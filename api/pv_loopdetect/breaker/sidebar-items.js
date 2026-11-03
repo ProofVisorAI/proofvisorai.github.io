@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BreakerAction","BreakerState","BreakerVerdict"],"struct":["BreakerConfig","SessionLoopState"]};

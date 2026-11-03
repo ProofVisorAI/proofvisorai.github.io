@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["JUDGE_POLICY_NAME"],"enum":["ToolVerdict"],"struct":["JudgeEvidence","Sandbox","SandboxConfig","SanitizeDenial","TransformApplied","ValidatedCall"]};

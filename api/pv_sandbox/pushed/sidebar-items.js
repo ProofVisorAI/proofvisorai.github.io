@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_TRANSFORM_REPLACEMENT","MAX_GUARDRAIL_PATTERNS","MAX_TRANSFORM_PATTERNS","MAX_TRANSFORM_REPLACEMENT_BYTES"],"enum":["GuardrailTarget","TransformTarget"],"struct":["GuardrailHit","PushedAllowlist","PushedGuardrail","PushedRules","PushedSchema","PushedTransform","ToolPattern"]};

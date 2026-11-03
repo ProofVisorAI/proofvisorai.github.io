@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MANIFEST_VERSION"],"enum":["ManifestError"],"struct":["BridgeManifest","RetentionSpec","TopicSpec"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CONTENT_QUEUE_CAPACITY"],"struct":["AuditOutputs","ContentDispatcher","ContentRecord"],"trait":["ContentSink"],"type":["SharedContentSink"]};

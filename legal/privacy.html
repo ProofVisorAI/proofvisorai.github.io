@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'">
+
+<meta charset="utf-8">
+<title>Privacy Policy · ProofVisor</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="../style.css">
+<style>
+  main { max-width: 720px; margin: 0 auto; padding: 3rem 1.5rem; line-height: 1.6; }
+  main h1 { font-size: 1.75rem; }
+  main h2 { font-size: 1.2rem; margin-top: 2rem; }
+  main .draft { background: #fff8e1; border: 1px solid #f0d178; padding: 0.75rem 1rem; border-radius: 8px; color: #6d4b00; font-size: 0.9rem; }
+  main a { color: #0a58ff; }
+</style>
+</head>
+<body>
+<main>
+  <p class="draft" style="background:#e8f5ec;border-color:#9fd4ae;color:#134b23">
+    <strong>What the public demo collects: nothing.</strong>
+    The demo console at proofvisor.com/app/ runs in your browser against
+    built-in sample data. It stores only your theme and the demo state in
+    your browser&rsquo;s localStorage, which &ldquo;Reset demo data&rdquo;
+    clears. The <em>hosted service</em> at api.proofvisor.com is live,
+    and the policy below describes it.
+  </p>
+  <p class="draft">
+    <strong>Draft (not yet reviewed by counsel).</strong>
+    Ship-blocker before real customer signups: counsel-reviewed copy.
+  </p>
+
+  <h1>Privacy policy</h1>
+  <p>Last updated: 2026-11-01.</p>
+
+  <h2>1. What we collect</h2>
+  <ul>
+    <li><strong>Account:</strong> email, display name, argon2id password hash, org name. If you sign in with Google, SAML or OIDC, we store the name and email address that the identity provider sends. If you register a passkey, we store its public key and credential ID.</li>
+    <li><strong>Audit log:</strong> each recorded action in your organization, with the IP address and browser user agent of the person who performed it.</li>
+    <li><strong>Session receipts:</strong> summaries your daemon posts — session id, agent name, model, token counts, cost estimate, tool-call metadata, blocked-vs-allowed markers, Ed25519 receipt signatures.</li>
+    <li><strong>Server logs:</strong> request method, path, status, latency, IP, request-id. Log lines never contain your password, session tokens, or reset tokens (verified with pino-redact + audit).</li>
+    <li><strong>Uptime metrics:</strong> aggregate counts + latency histograms, no per-user granularity.</li>
+  </ul>
+
+  <h2>2. What we do NOT collect</h2>
+  <ul>
+    <li>LLM prompt text</li>
+    <li>LLM completion text</li>
+    <li>Tool call arguments</li>
+    <li>Your customers' end-user PII</li>
+  </ul>
+
+  <p>These live inside your infrastructure. Our daemon runs in your
+  environment; only the summaries and receipts leave.</p>
+
+  <h2>3. How we store it</h2>
+  <p>Encrypted in transit (TLS 1.2+), encrypted at rest (managed
+  Postgres provider defaults; typically AES-256). Passwords hashed with
+  argon2id (19 MiB × 2 iterations × 1 lane, meets OWASP 2024 baseline).</p>
+
+  <h2>4. Who we share it with</h2>
+  <p>Nobody, unless legally compelled. Sub-processors:</p>
+  <ul>
+    <li><strong>Render</strong> — API hosting (US, Ohio region).</li>
+    <li><strong>Neon</strong> — managed Postgres (US East, Ohio region, us-east-2).</li>
+    <li><strong>Google</strong> — &ldquo;Sign in with Google&rdquo;: Google receives your sign-in request and returns your name and email address to us.</li>
+    <li><strong>Resend</strong> — transactional email (sign-up confirmations, password resets, invitations).</li>
+    <li><strong>GitHub Pages</strong> — hosting, TLS termination and CDN for the website and console SPA (static files only; no user data is stored there).</li>
+    <li><strong>GitHub</strong> — source control, container image registry, and storage of encrypted nightly database backups (GitHub Actions, kept for 30 days).</li>
+  </ul>
+
+  <h2>5. Your rights (GDPR + CCPA baseline)</h2>
+  <ul>
+    <li><strong>Export:</strong> POST /api/v1/auth/me/export (organization owners only; password re-entry required) — a full export of your organization as NDJSON (one JSON record per line).</li>
+    <li><strong>Delete:</strong> POST /api/v1/auth/me/delete-account (owner + password + confirmation string required) — cascading delete.</li>
+    <li><strong>Access + rectify:</strong> everything is editable in the console.</li>
+    <li><strong>Object + restrict:</strong> email hello@proofvisor.com for anything you can't do in-app.</li>
+  </ul>
+
+  <h2>6. Cookies</h2>
+  <p>One session cookie: <code>pv_session</code>, an HS256 JWT, httpOnly,
+  SameSite=Lax, Secure in production, 7-day TTL. Short-lived cookies are
+  also set during sign-in only: <code>pv_oauth_state</code> (Google or
+  OIDC sign-in), <code>pv_wa_reg_challenge</code> and
+  <code>pv_wa_auth_challenge</code> (passkeys), <code>pv_mfa_gate</code>
+  (two-step sign-in) and <code>pv_saml_txn</code> (SAML sign-in). No tracking cookies.
+  No third-party trackers. No analytics beacons.</p>
+
+  <h2>7. Data retention</h2>
+  <p>By default, sessions with their events and receipts are deleted
+  after 90 days, audit-log entries after 365 days, and webhook delivery
+  records after 30 days. Organization owners and admins can change the
+  first two periods (0 keeps the data indefinitely). Account data is kept
+  until you delete the account. Deleting your
+  account triggers immediate cascade delete. Nightly backups are
+  retained for 30 days per <a href="https://github.com/ProofVisorAI/proofvisor/blob/main/.github/workflows/backup.yml">the backup workflow</a> — after that a
+  restore isn't possible.</p>
+
+  <h2>8. Children</h2>
+  <p>Not for anyone under 16.</p>
+
+  <h2>9. Contact</h2>
+  <p>Data protection questions or requests:
+  <a href="https://github.com/ProofVisorAI/proofvisor/issues/new?title=Privacy%20question">open a GitHub issue</a> (the mail domain goes live with the beta).
+  Security: <a href="../.well-known/security.txt">security.txt</a>.</p>
+</main>
+</body>
+</html>

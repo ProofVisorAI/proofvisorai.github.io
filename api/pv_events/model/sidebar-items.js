@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CATEGORY_UID","OCSF_VERSION","PRODUCT_NAME"],"enum":["EventClass","StatusId"],"struct":["AgentIdentity","CharterFile","EventMetrics","Fingerprint","Metadata","OcsfEvent","OcsfEventBuilder","Product"]};

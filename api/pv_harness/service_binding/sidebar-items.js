@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ServiceBindingError"],"fn":["from_binding_root","from_vcap_services","try_from_env"],"struct":["ServiceBinding"]};

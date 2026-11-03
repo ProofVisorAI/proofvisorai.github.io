@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0c10">
+  <!--
+    Strict CSP: pure static landing page. No JS, no third-party
+    origins, images/fonts self only, OG image on same host.
+  -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; base-uri 'none'; form-action 'none'; script-src 'none'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self' data:; object-src 'none'; frame-src 'none'">
+  <title>ProofVisor. AI agents you can hand to an auditor</title>
+  <meta name="description" content="ProofVisor sits in front of your AI agent's LLM and tool calls. Point your OpenAI client at it, and every session can end with a signed receipt anyone can verify offline.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/png" href="logo.png">
+  <link rel="canonical" href="https://proofvisor.com/">
+  <meta property="og:title" content="ProofVisor. AI agents you can hand to an auditor">
+  <meta property="og:description" content="One line of code. Every session recorded, capped, and verifiable.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://proofvisor.com/">
+  <meta property="og:image" content="https://proofvisor.com/social-preview.png">
+  <meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+
+  <nav aria-label="Primary">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top"><img src="logo.png" alt="" width="26" height="26" style="vertical-align:-6px;margin-right:8px">ProofVisor</a>
+      <div class="nav-links">
+        <a href="#one-line">How it works</a>
+        <a href="#what-you-get">What you get</a>
+        <a href="#dashboard">Dashboard</a>
+        <a href="#try-it">Get started</a>
+        <a href="pitch/">Watch the pitch</a>
+        <a href="verify/">Verify a receipt</a>
+        <a href="app/">Console</a>
+        <a href="https://github.com/ProofVisorAI/proofvisor">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero" id="top">
+    <div class="wrap">
+      <h1>AI agents you can hand to an auditor.</h1>
+      <p class="lede">
+        ProofVisor is a small server you drop in front of your agent&rsquo;s LLM
+        and tool calls. Every request is recorded. Every limit you set is
+        enforced before the call goes out. Every session can end with a signed
+        receipt (the shipped configs sign by default). Anyone who holds your
+        deployment&rsquo;s public key can verify that receipt offline, without
+        asking you or us for anything else.
+      </p>
+      <p class="cta-row">
+        <a class="cta primary" href="app/?tour=1">See the full flow</a>
+        <a class="cta" href="pitch/">&#9654;&#xFE0E; Watch the film (30&nbsp;s)</a>
+        <a class="cta" href="app/">Open the console</a>
+        <a class="cta" href="verify/">Verify a receipt</a>
+      </p>
+      <p class="hero-meta">
+        v0.1.0&#8209;rc.8 (pre&#8209;release) &middot; Apache&#8209;2.0 &middot; Rust &middot; Runs on your machine, your VM, or your cluster
+      </p>
+    </div>
+  </header>
+
+  <main>
+
+    <section id="one-line">
+      <div class="wrap two-col">
+        <div>
+          <p class="section-kicker">Point your existing OpenAI client at it</p>
+          <h2>One line of code. Zero SDK.</h2>
+          <p>
+            ProofVisor speaks OpenAI&rsquo;s <code>chat/completions</code> and
+            MCP over plain HTTP. Change the base URL your client points at.
+            Nothing else in your app moves. (Long histories are compacted
+            by default before forwarding. Auditable, and one config
+            line to disable.)
+          </p>
+          <p class="muted">
+            Works the same way for Ollama, LM&nbsp;Studio, Azure OpenAI,
+            vLLM, LiteLLM, and anything else that speaks the OpenAI
+            <code>chat/completions</code> wire format. Requests to those
+            servers are forwarded unchanged. With the <code>provider</code>
+            setting <code>anthropic</code> or <code>gemini</code>, ProofVisor
+            converts each request into that vendor&rsquo;s own API format
+            and converts the answer back into the OpenAI format. These two
+            adapters have so far been tested only against local stand-ins,
+            not against the real vendor APIs.
+          </p>
+        </div>
+        <div>
+<pre class="code-diff" tabindex="0" role="region" aria-label="Python code example"><code><span class="diff-header">python</span>
+  from openai import OpenAI
+
+  client = OpenAI(
+      api_key=os.environ["OPENAI_API_KEY"],
+<span class="diff-add">+     base_url="http://127.0.0.1:8484/v1",</span>
+  )
+
+  client.chat.completions.create(
+      model="gpt-4o-mini",
+      messages=[{"role": "user", "content": "hello"}],
+  )</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="what-you-get" class="alt">
+      <div class="wrap">
+        <p class="section-kicker">What you get</p>
+        <h2>Three things you didn&rsquo;t have before.</h2>
+
+        <div class="feature">
+          <div class="feature-copy">
+            <h3>A signed record of every session</h3>
+            <p>
+              When the agent&rsquo;s session finishes, whether that&rsquo;s a single
+              chat completion or a 40-step tool-using conversation, ProofVisor
+              hands back a receipt like the one on the right. It commits to
+              the full event chain, the cost, and how many tool calls were
+              allowed vs blocked.
+            </p>
+            <p>
+              Verification is one <code>pvctl receipt-verify</code> call with
+              your public key. Or about 30 lines of your language&rsquo;s Ed25519
+              library. You don&rsquo;t need to trust ProofVisor to trust the
+              receipt; you only need the public key, obtained from the
+              operator out of band.
+            </p>
+            <p class="muted">
+              The browser verifier at <a href="verify/">/verify/</a> checks
+              the signature and the receipt&rsquo;s internal consistency, but
+              it only knows the sample and demo keys. For a real deployment
+              it reports &ldquo;internally consistent, trust anchor not
+              verified&rdquo; until you compare the key fingerprint with the
+              deployment page in the console. A verify link shared from the
+              console also checks the key the console pinned for that
+              deployment.
+            </p>
+          </div>
+          <div class="feature-visual">
+<pre class="filename">receipt.json</pre>
+<pre class="code-json" tabindex="0" role="region" aria-label="Receipt JSON example"><code>{
+  <span class="k">"receipt_version"</span>: <span class="n">2</span>,
+  <span class="k">"receipt_id"</span>: <span class="s">"01a00219-b3d0-7c31&hellip;"</span>,
+  <span class="k">"session_id"</span>: <span class="s">"sess-2026-08-14-42"</span>,
+  <span class="k">"issued_at"</span>: <span class="n">1786741634000</span>,
+  <span class="k">"issued_at_iso"</span>: <span class="s">"2026-08-14T21:07:14.000Z"</span>,
+  <span class="k">"ai_agent"</span>: {
+    <span class="k">"version"</span>: <span class="s">"0.1.0"</span>,
+    <span class="k">"charter"</span>: { <span class="k">"name"</span>: <span class="s">"triage&#8209;bot"</span>, <span class="k">"type_id"</span>: <span class="n">1</span> },
+    <span class="k">"instance_uid"</span>: <span class="s">"9c04e2d1&hellip;"</span>
+  },
+  <span class="k">"subject"</span>: {
+    <span class="k">"kind"</span>: <span class="s">"event_chain"</span>,
+    <span class="k">"chain_head"</span>: <span class="s">"b2b7c9d8&hellip;"</span>,
+    <span class="k">"event_count"</span>: <span class="n">47</span>
+  },
+  <span class="k">"tool_calls"</span>: {
+    <span class="k">"total"</span>: <span class="n">8</span>, <span class="k">"allowed"</span>: <span class="n">7</span>, <span class="k">"blocked"</span>: <span class="n">1</span>
+  },
+  <span class="k">"cost"</span>: {
+    <span class="k">"prompt_tokens"</span>: <span class="n">12408</span>,
+    <span class="k">"completion_tokens"</span>: <span class="n">3819</span>,
+    <span class="k">"cached_tokens"</span>: <span class="n">0</span>,
+    <span class="k">"cost_usd_micros"</span>: <span class="n">84340</span>
+  },
+  <span class="k">"stop_reason_id"</span>: <span class="n">92</span>,
+  <span class="k">"stop_reason"</span>: <span class="s">"Budget Exceeded"</span>,
+  <span class="k">"key_id"</span>: <span class="s">"c8f2&hellip;"</span>,
+  <span class="k">"public_key_b64"</span>: <span class="s">"fStglR1c&hellip;"</span>,
+  <span class="k">"signature_b64"</span>: <span class="s">"wg7A0Kx3&hellip;"</span>
+}</code></pre>
+          </div>
+        </div>
+
+        <div class="feature">
+          <div class="feature-copy">
+            <h3>Hard limits, refused at the door</h3>
+            <p>
+              That <code>blocked: 1</code> in the receipt was a tool call that
+              would have blown past the session&rsquo;s payout cap
+              (<code>max_payout_usd_micros</code>). Your agent
+              received a plain HTTP&nbsp;403 and moved on. The provider was
+              never contacted; the money was never spent.
+            </p>
+            <p>
+              Set caps on total tool calls, per-tool calls, spend in
+              micro-USD, and prompt tokens. Turn on the semantic loop
+              breaker if your agent tends to retry the same failing thing
+              until you go broke.
+            </p>
+          </div>
+          <div class="feature-visual">
+<pre class="filename">POST /v1/mcp</pre>
+<pre class="code-http" tabindex="0" role="region" aria-label="HTTP response example"><code><span class="http-status">HTTP/1.1 403 Forbidden</span>
+Content-Type: application/json
+
+{
+  <span class="k">"error"</span>: {
+    <span class="k">"code"</span>: -32001,
+    <span class="k">"message"</span>: <span class="s">"tool call blocked by ProofVisor policy"</span>,
+    <span class="k">"data"</span>: {
+      <span class="k">"reason"</span>: <span class="s">"max_payout_usd_micros (cap 50000000)"</span>
+    }
+  }
+}</code></pre>
+          </div>
+        </div>
+
+        <div class="feature">
+          <div class="feature-copy">
+            <h3>Evidence you can send anywhere</h3>
+            <p>
+              Every event is written as OCSF-shaped JSON. The same
+              schema your SIEM already speaks. A session on the signed
+              workflow (the default in every shipped config) ends in a
+              receipt; a session on the unsigned workflow ends in an ATIF
+              trajectory file compatible with the Harbor validator, and can
+              be promoted to a receipt later. Every artifact is just a file
+              on disk.
+            </p>
+            <p>
+              Ship the files to S3, feed them into Vector, hand them to
+              a customer&rsquo;s evidence locker, or archive them for the seven
+              years your industry demands. The daemon does not phone home;
+              uploading evidence to the hosted console is a separate,
+              opt-in <code>pvctl console-sync</code> step.
+            </p>
+          </div>
+          <div class="feature-visual">
+<pre class="filename">$ ls -R spool/ data/</pre>
+<pre class="code-shell" tabindex="0" role="region" aria-label="Shell output example"><code>spool/atif/
+&#x251C;&#x2500; 84a3f01c&hellip;.json        <span class="c"># ATIF v1.7 trajectory (hashed session id)</span>
+&#x251C;&#x2500; receipts/
+&#x2502;   &#x2514;&#x2500; 84a3f01c&hellip;.json    <span class="c"># signed session receipt</span>
+&#x2514;&#x2500; outbox/
+    &#x2514;&#x2500; 84a3f01c&hellip;.receipt.json <span class="c"># pending broker publish</span>
+data/bridge/
+&#x2514;&#x2500; topics/
+    &#x2514;&#x2500; agent.tool_call/
+        &#x2514;&#x2500; p0.jsonl           <span class="c"># OCSF event stream</span></code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="dashboard">
+      <div class="wrap two-col two-col-flip">
+        <div>
+          <p class="section-kicker">See what&rsquo;s happening</p>
+          <h2>A dashboard for the agent you already deployed.</h2>
+          <p>
+            Every ProofVisor instance ships a small operator dashboard at
+            <code>/dashboard</code>. Open it in a browser and you can see the
+            sessions your agent is running right now: which prompts, how
+            many tokens, how much money, which tools were called, which
+            calls were blocked, and where the ones that failed got stuck.
+          </p>
+          <p>
+            It reads the same in&#8209;memory state that produces receipts and
+            <code>/metrics</code>. No extra service, no separate database,
+            nothing to log into. Off by a config flag if you don&rsquo;t want it.
+          </p>
+          <p class="muted">
+            Want the bigger picture? The <a href="app/">hosted console demo</a>
+            shows the multi&#8209;deployment view with demo data, and the
+            <a href="pitch/">pitch page</a> walks the whole flow on film in
+            30&nbsp;seconds.
+          </p>
+          <ul class="check-list">
+            <li>Live session table with cost, tokens, tool&nbsp;calls, stop reason</li>
+            <li>Click a session to see its receipt as raw JSON, live</li>
+            <li>Filter by open, closed, or capture&#8209;failed. And by workflow</li>
+            <li>No JavaScript framework, no phone&#8209;home. Served straight from the binary</li>
+          </ul>
+        </div>
+        <aside class="dashboard-preview" aria-label="Dashboard preview">
+          <div class="mock-window">
+            <header class="mock-window-bar">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+              <span class="mock-url">proofvisor.internal / dashboard</span>
+            </header>
+            <div class="mock-body">
+              <div class="mock-stats">
+                <div class="mock-stat">
+                  <p class="mock-stat-label">Sessions</p>
+                  <p class="mock-stat-value">10</p>
+                  <p class="mock-stat-sub">10 open &middot; 0 closed</p>
+                </div>
+                <div class="mock-stat">
+                  <p class="mock-stat-label">Cost today</p>
+                  <p class="mock-stat-value">$2.84</p>
+                  <p class="mock-stat-sub">under $50 payout cap</p>
+                </div>
+                <div class="mock-stat">
+                  <p class="mock-stat-label">Tool calls</p>
+                  <p class="mock-stat-value">1,412</p>
+                  <p class="mock-stat-sub">
+                    <span class="mock-ok">1,406</span> allowed &middot;
+                    <span class="mock-fail">6</span> blocked
+                  </p>
+                </div>
+              </div>
+              <table class="mock-table">
+                <tr>
+                  <td><span class="mock-sid">coding&#8209;assistant</span></td>
+                  <td><span class="mock-pill live">Live</span></td>
+                  <td class="right">$0.42</td>
+                  <td class="right">312 in&nbsp;/&nbsp;188 out</td>
+                </tr>
+                <tr>
+                  <td><span class="mock-sid">docs&#8209;agent</span></td>
+                  <td><span class="mock-pill live">Live</span></td>
+                  <td class="right">$0.08</td>
+                  <td class="right">40 in&nbsp;/&nbsp;65 out</td>
+                </tr>
+                <tr>
+                  <td><span class="mock-sid">triage&#8209;bot</span></td>
+                  <td><span class="mock-pill closed">Sealed</span></td>
+                  <td class="right">$1.20</td>
+                  <td class="right">918 in&nbsp;/&nbsp;701 out</td>
+                </tr>
+                <tr>
+                  <td><span class="mock-sid">analytics&#8209;copilot</span></td>
+                  <td><span class="mock-pill failed">Blocked</span></td>
+                  <td class="right">$0.00</td>
+                  <td class="right">payout cap</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="when" class="alt">
+      <div class="wrap">
+        <p class="section-kicker">When you&rsquo;d want it</p>
+        <h2>Three moments this pays for itself.</h2>
+        <div class="scenarios">
+          <article>
+            <h3>The 3 AM cost spike</h3>
+            <p>
+              Your agent gets stuck in a retry loop and burns $2,400 on a
+              Sunday. ProofVisor&rsquo;s loop breaker plus the payout cap would
+              have cut it off at $10, logged what happened, and let your
+              on-call sleep.
+            </p>
+          </article>
+          <article>
+            <h3>The compliance email</h3>
+            <p>
+              An auditor asks which customers&rsquo; data your agent touched
+              last quarter. Instead of running a scavenger hunt through
+              LangSmith and provider dashboards, you hand over a
+              directory of receipts and a public key.
+            </p>
+          </article>
+          <article>
+            <h3>The customer question</h3>
+            <p>
+              A customer wants to know whether the agent you built for
+              them called any model or tool other than the ones you
+              promised. You give them a session receipt and about 30 lines
+              of verification code.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="try-it">
+      <div class="wrap two-col">
+        <div>
+          <p class="section-kicker">Get started</p>
+          <h2>60 seconds, one prompt at a time.</h2>
+          <p>
+            One command installs both binaries. The installer downloads
+            prebuilt releases for Linux and macOS, checks their SHA&#8209;256
+            checksums, and falls back to <code>cargo install --git</code>
+            (which needs <a href="https://rustup.rs/">Rust</a>) on any
+            other platform. Then run <code>pvctl</code>: the wizard asks
+            one thing at a time and writes the config file for you. When
+            it finishes, ProofVisor is running on
+            <code>http://127.0.0.1:8484</code>.
+          </p>
+          <p>
+            Point your OpenAI client at that URL as if it were the
+            provider. No code changes beyond the one line above.
+          </p>
+        </div>
+        <div>
+<pre class="code-shell" tabindex="0" role="region" aria-label="Shell output example"><code><span class="prompt">$</span> curl -fsSL https://proofvisor.com/install.sh | sh
+<span class="prompt">$</span> pvctl
+
+  Welcome to ProofVisor! A couple of quick questions and you're done.
+
+  Where do your AI models come from?
+  <span class="c">1) OpenAI (GPT models)</span>
+  <span class="c">2) Anthropic (Claude)</span>
+  <span class="c">3) Google (Gemini)</span>
+  <span class="c">4) Azure OpenAI</span>
+  <span class="c">&hellip;</span>
+  <span class="c">11) Ollama on this computer (free, no key needed)</span>
+  <span class="c">12) LM Studio on this computer (free, no key needed)</span>
+  <span class="c">13) Somewhere else (I have a URL)</span>
+  Type a number and press Enter <span class="c">[1]</span>: <span class="in">1</span>
+
+  Paste your OpenAI API key: <span class="in">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>
+
+  All set!
+  API key:  ~/.proofvisor/keys/openai.key (private to your user account)
+
+  Start ProofVisor now? <span class="c">[Y/n]</span>: <span class="in">y</span>
+
+  &check; ProofVisor is running at http://127.0.0.1:8484
+  Use it from any OpenAI-compatible app:
+    Base URL: http://127.0.0.1:8484/v1
+    API key:  anything (your real key stays on this machine)
+  Press Ctrl-C to stop.</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="under-hood" class="alt">
+      <div class="wrap">
+        <p class="section-kicker">Under the hood</p>
+        <h2>Boring, on purpose.</h2>
+        <p class="lede lede-secondary">
+          ProofVisor is a Rust workspace of thirteen crates. The daemon
+          never phones home and needs no hosted service: it writes files,
+          and you keep the signing key. The hosted console is opt-in; your
+          daemon only talks to it if you run <code>pvctl console-sync</code>.
+        </p>
+        <div class="tech-grid">
+          <div>
+            <h3>Runs anywhere Rust runs</h3>
+            <p>
+              Single static binary, or Docker Compose with the full
+              stack (broker, state store, vector DB, cold storage).
+              Also ships a hardened Kubernetes manifest and
+              a systemd unit with sensible defaults.
+            </p>
+          </div>
+          <div>
+            <h3>Pluggable backends</h3>
+            <p>
+              Event bus: embedded (files), Kafka&#x202F;/&#x202F;Redpanda, NATS JetStream.
+              State: in-memory or Redis. Vector store: Qdrant or none.
+              Pick what your org already runs.
+            </p>
+          </div>
+          <div>
+            <h3>Interoperable formats</h3>
+            <p>
+              Events are OCSF&nbsp;1.10; trajectories are ATIF&nbsp;v1.7; receipts
+              are Ed25519 over RFC&nbsp;8785 canonical JSON. If you already
+              have a SIEM or an evidence tool, it probably already reads
+              these.
+            </p>
+          </div>
+          <div>
+            <h3>Tested and dependency-checked</h3>
+            <p>
+              Every fix is regression-tested. The full suite runs on
+              every code push; supply-chain policy is enforced by
+              <code>cargo&#8209;deny</code>. Read the security model
+              before you deploy it. It&rsquo;s honest about what it
+              does and does not defend against.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="read-more">
+      <div class="wrap">
+        <p class="section-kicker">Read more</p>
+        <h2>Everything else.</h2>
+        <ul class="link-columns">
+          <li><a href="https://github.com/ProofVisorAI/proofvisor#readme">README</a>. Full setup, configuration, CLI reference.</li>
+          <li><a href="https://github.com/ProofVisorAI/proofvisor/blob/main/ARCHITECTURE.md">Architecture</a>. How the pipeline fits together.</li>
+          <li><a href="https://github.com/ProofVisorAI/proofvisor/blob/main/SECURITY.md">Security model</a>. Trust boundaries and threat model.</li>
+          <li><a href="https://github.com/ProofVisorAI/proofvisor/blob/main/docs/reference/VERIFYING-A-RECEIPT.md">Verifying a receipt</a>. Verifying a receipt from scratch.</li>
+          <li><a href="https://github.com/ProofVisorAI/proofvisor/blob/main/CONFORMANCE-STATUS.md">Conformance status</a>. The compliance / MVP verdict record.</li>
+          <li><a href="https://github.com/ProofVisorAI/proofvisor/blob/main/BENCHMARKS.md">Benchmarks</a>. Hot-path latency and a 10&#x00A0;000-connection load test.</li>
+          <li><a href="https://github.com/ProofVisorAI/proofvisor/releases">Releases</a>. Pre-built binaries with SHA-256 checksums.</li>
+          <li><a href="api/">API documentation</a>. Rust crate reference. Skip unless you&rsquo;re embedding ProofVisor as a library.</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap footer-inner">
+      <p>
+        <a href="pitch/">Pitch</a> &middot;
+        <a href="app/">Console</a> &middot;
+        <a href="verify/">Verifier</a> &middot;
+        <a href="https://github.com/ProofVisorAI/proofvisor">GitHub</a> &middot;
+        <a href="https://github.com/ProofVisorAI/proofvisor/blob/main/LICENSE">Apache&nbsp;2.0</a> &middot;
+        <a href="legal/privacy.html">Privacy</a> &middot;
+        <a href="legal/terms.html">Terms</a> &middot;
+        <a href="https://github.com/ProofVisorAI/proofvisor/security/advisories/new">Report a vulnerability</a>
+      </p>
+      <p class="muted">
+        ProofVisor is open source and free to use. If it saves you
+        from a 3&nbsp;AM incident, please <a href="https://github.com/ProofVisorAI/proofvisor">star the repo</a>.
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>

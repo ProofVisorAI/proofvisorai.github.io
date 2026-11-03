@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SCHEMA_TIME_MAX_MS"],"enum":["ValidationError"],"fn":["validate_event"]};

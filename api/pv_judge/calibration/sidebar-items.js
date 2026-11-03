@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["auroc_ppm","calibrate","load_jsonl"],"struct":["CalibrationFloor","CalibrationReport","LabelledExample","PredicateReport"]};

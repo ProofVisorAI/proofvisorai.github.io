@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ATIF_VERSION","SUPPORTED_VERSIONS"],"enum":["ReasoningEffort","Source"],"struct":["Agent","FinalMetrics","Metrics","Observation","ObservationResult","Step","SubagentTrajectoryRef","ToolCall","Trajectory"]};

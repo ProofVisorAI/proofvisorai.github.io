@@ -1,0 +1,1052 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `crates/pv-identity/src/validator.rs`."><title>validator.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="pv_identity" data-themes="" data-resource-suffix="" data-rustdoc-version="1.97.1 (8bab26f4f 2026-07-14)" data-channel="1.97.1" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">pv_identity/</div>validator.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Token validation and delegation-chain verification.
+<a href=#2 id=2 data-nosnippet>2</a>
+<a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span><span class="kw">crate</span>::claims::{NhiClaims, MAX_TTL_SECS};
+<a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span><span class="kw">crate</span>::revocation::{RevocationIdentity, RevokedBy};
+<a href=#5 id=5 data-nosnippet>5</a>
+<a href=#6 id=6 data-nosnippet>6</a><span class="doccomment">/// Clock tolerance shared by inbound and exchanged-token validation.
+<a href=#7 id=7 data-nosnippet>7</a></span><span class="kw">pub const </span>DEFAULT_LEEWAY_SECS: u64 = <span class="number">30</span>;
+<a href=#8 id=8 data-nosnippet>8</a><span class="doccomment">/// Maximum number of scopes carried by a token.
+<a href=#9 id=9 data-nosnippet>9</a></span><span class="kw">pub const </span>MAX_SCOPES: usize = <span class="number">64</span>;
+<a href=#10 id=10 data-nosnippet>10</a><span class="doccomment">/// Maximum characters in a rendered identity field or scope.
+<a href=#11 id=11 data-nosnippet>11</a></span><span class="kw">pub const </span>MAX_IDENTITY_STRING_CHARS: usize = <span class="number">256</span>;
+<a href=#12 id=12 data-nosnippet>12</a><span class="kw">use </span>base64::Engine <span class="kw">as _</span>;
+<a href=#13 id=13 data-nosnippet>13</a><span class="kw">use </span>jsonwebtoken::{Algorithm, DecodingKey, Validation};
+<a href=#14 id=14 data-nosnippet>14</a><span class="kw">use </span>parking_lot::RwLock;
+<a href=#15 id=15 data-nosnippet>15</a><span class="kw">use </span>std::collections::{HashMap, HashSet};
+<a href=#16 id=16 data-nosnippet>16</a>
+<a href=#17 id=17 data-nosnippet>17</a><span class="doccomment">/// Verification key material, bound to a `kid`.
+<a href=#18 id=18 data-nosnippet>18</a></span><span class="attr">#[derive(Clone)]
+<a href=#19 id=19 data-nosnippet>19</a></span><span class="kw">pub enum </span>KeyMaterial {
+<a href=#20 id=20 data-nosnippet>20</a>    <span class="doccomment">/// Ed25519 public key, SPKI PEM (`-----BEGIN PUBLIC KEY-----`). EdDSA.
+<a href=#21 id=21 data-nosnippet>21</a>    </span>Ed25519Pem(String),
+<a href=#22 id=22 data-nosnippet>22</a>    <span class="doccomment">/// Ed25519 JWK `x` coordinate, base64url without padding.
+<a href=#23 id=23 data-nosnippet>23</a>    </span>Ed25519Jwk(String),
+<a href=#24 id=24 data-nosnippet>24</a>    <span class="doccomment">/// HMAC shared secret. HS256 (dev / shared-secret IdP integrations).
+<a href=#25 id=25 data-nosnippet>25</a>    </span>HmacSecret(Vec&lt;u8&gt;),
+<a href=#26 id=26 data-nosnippet>26</a>}
+<a href=#27 id=27 data-nosnippet>27</a>
+<a href=#28 id=28 data-nosnippet>28</a><span class="kw">impl </span>std::fmt::Debug <span class="kw">for </span>KeyMaterial {
+<a href=#29 id=29 data-nosnippet>29</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; std::fmt::Result {
+<a href=#30 id=30 data-nosnippet>30</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#31 id=31 data-nosnippet>31</a>            <span class="self">Self</span>::Ed25519Pem(<span class="kw">_</span>) =&gt; f.write_str(<span class="string">"KeyMaterial::Ed25519Pem(..)"</span>),
+<a href=#32 id=32 data-nosnippet>32</a>            <span class="self">Self</span>::Ed25519Jwk(<span class="kw">_</span>) =&gt; f.write_str(<span class="string">"KeyMaterial::Ed25519Jwk(..)"</span>),
+<a href=#33 id=33 data-nosnippet>33</a>            <span class="self">Self</span>::HmacSecret(<span class="kw">_</span>) =&gt; f.write_str(<span class="string">"KeyMaterial::HmacSecret(..)"</span>), <span class="comment">// never print secrets
+<a href=#34 id=34 data-nosnippet>34</a>        </span>}
+<a href=#35 id=35 data-nosnippet>35</a>    }
+<a href=#36 id=36 data-nosnippet>36</a>}
+<a href=#37 id=37 data-nosnippet>37</a>
+<a href=#38 id=38 data-nosnippet>38</a><span class="doccomment">/// Identity validation failures.
+<a href=#39 id=39 data-nosnippet>39</a></span><span class="attr">#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+<a href=#40 id=40 data-nosnippet>40</a>#[non_exhaustive]
+<a href=#41 id=41 data-nosnippet>41</a></span><span class="kw">pub enum </span>IdentityError {
+<a href=#42 id=42 data-nosnippet>42</a>    <span class="doccomment">/// Token structurally malformed.
+<a href=#43 id=43 data-nosnippet>43</a>    </span><span class="attr">#[error(<span class="string">"malformed token: {0}"</span>)]
+<a href=#44 id=44 data-nosnippet>44</a>    </span>Malformed(String),
+<a href=#45 id=45 data-nosnippet>45</a>    <span class="doccomment">/// Header lacks a `kid`.
+<a href=#46 id=46 data-nosnippet>46</a>    </span><span class="attr">#[error(<span class="string">"token header has no kid"</span>)]
+<a href=#47 id=47 data-nosnippet>47</a>    </span>MissingKid,
+<a href=#48 id=48 data-nosnippet>48</a>    <span class="doccomment">/// No key registered for this `kid`.
+<a href=#49 id=49 data-nosnippet>49</a>    </span><span class="attr">#[error(<span class="string">"unknown kid {0:?}"</span>)]
+<a href=#50 id=50 data-nosnippet>50</a>    </span>UnknownKid(String),
+<a href=#51 id=51 data-nosnippet>51</a>    <span class="doccomment">/// Token `alg` is not accepted, or does not match the key type for its
+<a href=#52 id=52 data-nosnippet>52</a>    /// `kid` (algorithm-confusion defense).
+<a href=#53 id=53 data-nosnippet>53</a>    </span><span class="attr">#[error(<span class="string">"algorithm {alg:?} not permitted for kid {kid:?}"</span>)]
+<a href=#54 id=54 data-nosnippet>54</a>    </span>AlgorithmRejected {
+<a href=#55 id=55 data-nosnippet>55</a>        <span class="doccomment">/// Stated algorithm.
+<a href=#56 id=56 data-nosnippet>56</a>        </span>alg: String,
+<a href=#57 id=57 data-nosnippet>57</a>        <span class="doccomment">/// Key id.
+<a href=#58 id=58 data-nosnippet>58</a>        </span>kid: String,
+<a href=#59 id=59 data-nosnippet>59</a>    },
+<a href=#60 id=60 data-nosnippet>60</a>    <span class="doccomment">/// Signature invalid / expired / nbf future / wrong audience — collapsed
+<a href=#61 id=61 data-nosnippet>61</a>    /// by jsonwebtoken; the detail string preserves the cause.
+<a href=#62 id=62 data-nosnippet>62</a>    </span><span class="attr">#[error(<span class="string">"verification failed: {0}"</span>)]
+<a href=#63 id=63 data-nosnippet>63</a>    </span>Verification(String),
+<a href=#64 id=64 data-nosnippet>64</a>    <span class="doccomment">/// `exp - iat` exceeds the 15-minute NHI cap.
+<a href=#65 id=65 data-nosnippet>65</a>    </span><span class="attr">#[error(<span class="string">"ttl {0}s exceeds the {MAX_TTL_SECS}s NHI cap"</span>)]
+<a href=#66 id=66 data-nosnippet>66</a>    </span>TtlTooLong(u64),
+<a href=#67 id=67 data-nosnippet>67</a>    <span class="doccomment">/// `exp ≤ iat` or other timestamp nonsense.
+<a href=#68 id=68 data-nosnippet>68</a>    </span><span class="attr">#[error(<span class="string">"inconsistent timestamps (iat {iat}, exp {exp})"</span>)]
+<a href=#69 id=69 data-nosnippet>69</a>    </span>BadTimestamps {
+<a href=#70 id=70 data-nosnippet>70</a>        <span class="doccomment">/// Issued-at.
+<a href=#71 id=71 data-nosnippet>71</a>        </span>iat: u64,
+<a href=#72 id=72 data-nosnippet>72</a>        <span class="doccomment">/// Expiry.
+<a href=#73 id=73 data-nosnippet>73</a>        </span>exp: u64,
+<a href=#74 id=74 data-nosnippet>74</a>    },
+<a href=#75 id=75 data-nosnippet>75</a>    <span class="doccomment">/// `iat` is unreasonably far in the future.
+<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="attr">#[error(<span class="string">"issued-at timestamp {iat} is in the future (now {now})"</span>)]
+<a href=#77 id=77 data-nosnippet>77</a>    </span>FutureIat {
+<a href=#78 id=78 data-nosnippet>78</a>        <span class="doccomment">/// Issued-at claim.
+<a href=#79 id=79 data-nosnippet>79</a>        </span>iat: u64,
+<a href=#80 id=80 data-nosnippet>80</a>        <span class="doccomment">/// Validator wall clock.
+<a href=#81 id=81 data-nosnippet>81</a>        </span>now: u64,
+<a href=#82 id=82 data-nosnippet>82</a>    },
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="doccomment">/// Token expired — with enough context to tell a stale token from a
+<a href=#84 id=84 data-nosnippet>84</a>    /// skewed validator clock. Round-106/107 drills: a +6h host rejects
+<a href=#85 id=85 data-nosnippet>85</a>    /// every honest client with a bare "ExpiredSignature", sending the
+<a href=#86 id=86 data-nosnippet>86</a>    /// operator hunting client TTLs instead of their own NTP. An
+<a href=#87 id=87 data-nosnippet>87</a>    /// "expiry" further in the past than the maximum issuable TTL can
+<a href=#88 id=88 data-nosnippet>88</a>    /// only mean the validating host's clock is ahead.
+<a href=#89 id=89 data-nosnippet>89</a>    </span><span class="attr">#[error(
+<a href=#90 id=90 data-nosnippet>90</a>        <span class="string">"token expired: exp {exp}, validator now {now} ({past_s}s past expiry{hint})"</span>,
+<a href=#91 id=91 data-nosnippet>91</a>        past_s = now.saturating_sub(<span class="kw-2">*</span>exp),
+<a href=#92 id=92 data-nosnippet>92</a>        hint = <span class="kw">if </span>now.saturating_sub(<span class="kw-2">*</span>exp) &gt; MAX_TTL_SECS {
+<a href=#93 id=93 data-nosnippet>93</a>            <span class="string">" — longer than the maximum token TTL; this host's clock is likely ahead (check NTP)"
+<a href=#94 id=94 data-nosnippet>94</a>        </span>} <span class="kw">else </span>{
+<a href=#95 id=95 data-nosnippet>95</a>            <span class="string">""
+<a href=#96 id=96 data-nosnippet>96</a>        </span>}
+<a href=#97 id=97 data-nosnippet>97</a>    )]
+<a href=#98 id=98 data-nosnippet>98</a>    </span>Expired {
+<a href=#99 id=99 data-nosnippet>99</a>        <span class="doccomment">/// Expiry claim (signature-verified before extraction).
+<a href=#100 id=100 data-nosnippet>100</a>        </span>exp: u64,
+<a href=#101 id=101 data-nosnippet>101</a>        <span class="doccomment">/// Validator wall clock.
+<a href=#102 id=102 data-nosnippet>102</a>        </span>now: u64,
+<a href=#103 id=103 data-nosnippet>103</a>    },
+<a href=#104 id=104 data-nosnippet>104</a>    <span class="doccomment">/// Required identity field empty.
+<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="attr">#[error(<span class="string">"empty identity field {0}"</span>)]
+<a href=#106 id=106 data-nosnippet>106</a>    </span>EmptyField(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
+<a href=#107 id=107 data-nosnippet>107</a>    <span class="doccomment">/// Identity field longer than its documented cap.
+<a href=#108 id=108 data-nosnippet>108</a>    </span><span class="attr">#[error(<span class="string">"identity field {field} exceeds {max} characters"</span>)]
+<a href=#109 id=109 data-nosnippet>109</a>    </span>FieldTooLong {
+<a href=#110 id=110 data-nosnippet>110</a>        <span class="doccomment">/// Field name.
+<a href=#111 id=111 data-nosnippet>111</a>        </span>field: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#112 id=112 data-nosnippet>112</a>        <span class="doccomment">/// Documented cap in Unicode code points.
+<a href=#113 id=113 data-nosnippet>113</a>        </span>max: usize,
+<a href=#114 id=114 data-nosnippet>114</a>    },
+<a href=#115 id=115 data-nosnippet>115</a>    <span class="doccomment">/// Field carries a bidi override or zero-width character that would
+<a href=#116 id=116 data-nosnippet>116</a>    /// spoof how the identity renders in a log or audit view.
+<a href=#117 id=117 data-nosnippet>117</a>    </span><span class="attr">#[error(<span class="string">"identity field {0} carries a bidi/zero-width spoofing character"</span>)]
+<a href=#118 id=118 data-nosnippet>118</a>    </span>SpoofingCharacter(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
+<a href=#119 id=119 data-nosnippet>119</a>    <span class="doccomment">/// Issuer not in the allowlist.
+<a href=#120 id=120 data-nosnippet>120</a>    </span><span class="attr">#[error(<span class="string">"issuer {0:?} not allowed"</span>)]
+<a href=#121 id=121 data-nosnippet>121</a>    </span>BadIssuer(String),
+<a href=#122 id=122 data-nosnippet>122</a>    <span class="doccomment">/// JWKS document was malformed or contained no supported signing keys.
+<a href=#123 id=123 data-nosnippet>123</a>    </span><span class="attr">#[error(<span class="string">"invalid JWKS: {0}"</span>)]
+<a href=#124 id=124 data-nosnippet>124</a>    </span>Jwks(String),
+<a href=#125 id=125 data-nosnippet>125</a>    <span class="doccomment">/// Child scopes exceed parent scopes.
+<a href=#126 id=126 data-nosnippet>126</a>    </span><span class="attr">#[error(<span class="string">"scope escalation: {scope:?} not granted by parent"</span>)]
+<a href=#127 id=127 data-nosnippet>127</a>    </span>ScopeEscalation {
+<a href=#128 id=128 data-nosnippet>128</a>        <span class="doccomment">/// The offending scope.
+<a href=#129 id=129 data-nosnippet>129</a>        </span>scope: String,
+<a href=#130 id=130 data-nosnippet>130</a>    },
+<a href=#131 id=131 data-nosnippet>131</a>    <span class="doccomment">/// Child outlives parent.
+<a href=#132 id=132 data-nosnippet>132</a>    </span><span class="attr">#[error(<span class="string">"child exp {child} outlives parent exp {parent}"</span>)]
+<a href=#133 id=133 data-nosnippet>133</a>    </span>ExpEscalation {
+<a href=#134 id=134 data-nosnippet>134</a>        <span class="doccomment">/// Child expiry.
+<a href=#135 id=135 data-nosnippet>135</a>        </span>child: u64,
+<a href=#136 id=136 data-nosnippet>136</a>        <span class="doccomment">/// Parent expiry.
+<a href=#137 id=137 data-nosnippet>137</a>        </span>parent: u64,
+<a href=#138 id=138 data-nosnippet>138</a>    },
+<a href=#139 id=139 data-nosnippet>139</a>    <span class="doccomment">/// Child claims to be issued before its parent (the delegator).
+<a href=#140 id=140 data-nosnippet>140</a>    /// A backdated child forges audit-trail causality: consumers that
+<a href=#141 id=141 data-nosnippet>141</a>    /// treat `claims.iat` as "when this identity became authorized"
+<a href=#142 id=142 data-nosnippet>142</a>    /// see the child asserting authority before the parent that
+<a href=#143 id=143 data-nosnippet>143</a>    /// granted it existed.
+<a href=#144 id=144 data-nosnippet>144</a>    </span><span class="attr">#[error(<span class="string">"child iat {child} predates parent iat {parent}"</span>)]
+<a href=#145 id=145 data-nosnippet>145</a>    </span>IatEscalation {
+<a href=#146 id=146 data-nosnippet>146</a>        <span class="doccomment">/// Child issued-at.
+<a href=#147 id=147 data-nosnippet>147</a>        </span>child: u64,
+<a href=#148 id=148 data-nosnippet>148</a>        <span class="doccomment">/// Parent issued-at.
+<a href=#149 id=149 data-nosnippet>149</a>        </span>parent: u64,
+<a href=#150 id=150 data-nosnippet>150</a>    },
+<a href=#151 id=151 data-nosnippet>151</a>    <span class="doccomment">/// Child's effective start (`nbf` when set, else `iat`) is
+<a href=#152 id=152 data-nosnippet>152</a>    /// earlier than the parent's effective start (`nbf` when set,
+<a href=#153 id=153 data-nosnippet>153</a>    /// else `iat`) — same forgery class as `IatEscalation`. The
+<a href=#154 id=154 data-nosnippet>154</a>    /// carried `child` and `parent` values are the compared
+<a href=#155 id=155 data-nosnippet>155</a>    /// EFFECTIVE starts, not the raw `nbf` fields (which may be
+<a href=#156 id=156 data-nosnippet>156</a>    /// absent). See `IdentityValidator::validate` for the full
+<a href=#157 id=157 data-nosnippet>157</a>    /// case matrix.
+<a href=#158 id=158 data-nosnippet>158</a>    </span><span class="attr">#[error(<span class="string">"child effective-start {child} predates parent effective-start {parent}"</span>)]
+<a href=#159 id=159 data-nosnippet>159</a>    </span>NbfEscalation {
+<a href=#160 id=160 data-nosnippet>160</a>        <span class="doccomment">/// Child effective start: `child.nbf` when set, else
+<a href=#161 id=161 data-nosnippet>161</a>        /// `child.iat`. The fallback closes an input case where the
+<a href=#162 id=162 data-nosnippet>162</a>        /// child omits `nbf` but its `iat` predates the parent's
+<a href=#163 id=163 data-nosnippet>163</a>        /// explicit `nbf` — a temporal-inversion forgery an earlier
+<a href=#164 id=164 data-nosnippet>164</a>        /// version of this guard silently accepted.
+<a href=#165 id=165 data-nosnippet>165</a>        </span>child: u64,
+<a href=#166 id=166 data-nosnippet>166</a>        <span class="doccomment">/// Parent effective start: `parent.nbf` when set, else
+<a href=#167 id=167 data-nosnippet>167</a>        /// `parent.iat`.
+<a href=#168 id=168 data-nosnippet>168</a>        </span>parent: u64,
+<a href=#169 id=169 data-nosnippet>169</a>    },
+<a href=#170 id=170 data-nosnippet>170</a>    <span class="doccomment">/// Delegation chain deeper than permitted.
+<a href=#171 id=171 data-nosnippet>171</a>    </span><span class="attr">#[error(<span class="string">"delegation chain deeper than {0}"</span>)]
+<a href=#172 id=172 data-nosnippet>172</a>    </span>ChainTooDeep(usize),
+<a href=#173 id=173 data-nosnippet>173</a>    <span class="doccomment">/// Token's JTI (or the JTI of a token in its delegation chain) appears
+<a href=#174 id=174 data-nosnippet>174</a>    /// in the revocation store.
+<a href=#175 id=175 data-nosnippet>175</a>    </span><span class="attr">#[error(<span class="string">"token {0:?} has been revoked"</span>)]
+<a href=#176 id=176 data-nosnippet>176</a>    </span>Revoked(String),
+<a href=#177 id=177 data-nosnippet>177</a>    <span class="doccomment">/// Tokens issued by this instance at or before the cutoff were revoked.
+<a href=#178 id=178 data-nosnippet>178</a>    </span><span class="attr">#[error(<span class="string">"instance {instance_uid:?} revoked through {cutoff}"</span>)]
+<a href=#179 id=179 data-nosnippet>179</a>    </span>InstanceRevoked {
+<a href=#180 id=180 data-nosnippet>180</a>        <span class="doccomment">/// Revoked instance identifier.
+<a href=#181 id=181 data-nosnippet>181</a>        </span>instance_uid: String,
+<a href=#182 id=182 data-nosnippet>182</a>        <span class="doccomment">/// Inclusive issued-at cutoff.
+<a href=#183 id=183 data-nosnippet>183</a>        </span>cutoff: u64,
+<a href=#184 id=184 data-nosnippet>184</a>    },
+<a href=#185 id=185 data-nosnippet>185</a>    <span class="doccomment">/// The revocation store could not be read. The token is refused
+<a href=#186 id=186 data-nosnippet>186</a>    /// because it might be revoked; this is an availability fault, not a
+<a href=#187 id=187 data-nosnippet>187</a>    /// credential fault.
+<a href=#188 id=188 data-nosnippet>188</a>    </span><span class="attr">#[error(<span class="string">"revocation list unavailable: {0}"</span>)]
+<a href=#189 id=189 data-nosnippet>189</a>    </span>RevocationUnavailable(String),
+<a href=#190 id=190 data-nosnippet>190</a>    <span class="doccomment">/// The token's `sub` does not match the configured human-principal
+<a href=#191 id=191 data-nosnippet>191</a>    /// pattern, so the identity is not attributable to a human.
+<a href=#192 id=192 data-nosnippet>192</a>    </span><span class="attr">#[error(<span class="string">"token subject is not a human principal"</span>)]
+<a href=#193 id=193 data-nosnippet>193</a>    </span>SubjectNotHuman,
+<a href=#194 id=194 data-nosnippet>194</a>    <span class="doccomment">/// The human-principal pattern itself is invalid.
+<a href=#195 id=195 data-nosnippet>195</a>    </span><span class="attr">#[error(<span class="string">"invalid human subject pattern: {0}"</span>)]
+<a href=#196 id=196 data-nosnippet>196</a>    </span>SubjectPattern(String),
+<a href=#197 id=197 data-nosnippet>197</a>}
+<a href=#198 id=198 data-nosnippet>198</a>
+<a href=#199 id=199 data-nosnippet>199</a><span class="doccomment">/// A successfully validated identity.
+<a href=#200 id=200 data-nosnippet>200</a></span><span class="attr">#[derive(Debug, Clone)]
+<a href=#201 id=201 data-nosnippet>201</a></span><span class="kw">pub struct </span>ValidatedIdentity {
+<a href=#202 id=202 data-nosnippet>202</a>    <span class="doccomment">/// The leaf token's claims.
+<a href=#203 id=203 data-nosnippet>203</a>    </span><span class="kw">pub </span>claims: NhiClaims,
+<a href=#204 id=204 data-nosnippet>204</a>    <span class="doccomment">/// Number of delegation links above the leaf (0 = root token).
+<a href=#205 id=205 data-nosnippet>205</a>    </span><span class="kw">pub </span>chain_depth: usize,
+<a href=#206 id=206 data-nosnippet>206</a>    <span class="doccomment">/// Validated tokens in the delegation chain, leaf first.
+<a href=#207 id=207 data-nosnippet>207</a>    </span><span class="kw">pub </span>chain_tokens: Vec&lt;RevocationIdentity&gt;,
+<a href=#208 id=208 data-nosnippet>208</a>    <span class="doccomment">/// Total delegation depth including both `parent_token` chain links
+<a href=#209 id=209 data-nosnippet>209</a>    /// and `act` claim nesting.
+<a href=#210 id=210 data-nosnippet>210</a>    </span><span class="kw">pub </span>total_delegation_depth: usize,
+<a href=#211 id=211 data-nosnippet>211</a>    <span class="doccomment">/// Seconds of TTL remaining at validation time.
+<a href=#212 id=212 data-nosnippet>212</a>    </span><span class="kw">pub </span>ttl_remaining_s: u64,
+<a href=#213 id=213 data-nosnippet>213</a>}
+<a href=#214 id=214 data-nosnippet>214</a>
+<a href=#215 id=215 data-nosnippet>215</a><span class="kw">impl </span>ValidatedIdentity {
+<a href=#216 id=216 data-nosnippet>216</a>    <span class="doccomment">/// The agent identity block to bind into emitted events (Module D → E).
+<a href=#217 id=217 data-nosnippet>217</a>    </span><span class="kw">pub fn </span>agent_identity(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; pv_events::AgentIdentity {
+<a href=#218 id=218 data-nosnippet>218</a>        pv_events::AgentIdentity {
+<a href=#219 id=219 data-nosnippet>219</a>            version: <span class="self">self</span>.claims.version.clone(),
+<a href=#220 id=220 data-nosnippet>220</a>            charter: <span class="self">self</span>.claims.charter.clone().into(),
+<a href=#221 id=221 data-nosnippet>221</a>            instance_uid: <span class="self">self</span>.claims.instance_uid.clone(),
+<a href=#222 id=222 data-nosnippet>222</a>            ttl_remaining_s: <span class="prelude-val">Some</span>(<span class="self">self</span>.ttl_remaining_s),
+<a href=#223 id=223 data-nosnippet>223</a>        }
+<a href=#224 id=224 data-nosnippet>224</a>    }
+<a href=#225 id=225 data-nosnippet>225</a>}
+<a href=#226 id=226 data-nosnippet>226</a>
+<a href=#227 id=227 data-nosnippet>227</a><span class="doccomment">/// The validator: keyed by `kid`, audience-bound, and optionally
+<a href=#228 id=228 data-nosnippet>228</a>/// issuer-allowlisted (opt in via [`IdentityValidator::allow_issuers`];
+<a href=#229 id=229 data-nosnippet>229</a>/// with no allowlist configured, any issuer is accepted).
+<a href=#230 id=230 data-nosnippet>230</a></span><span class="kw">pub struct </span>IdentityValidator {
+<a href=#231 id=231 data-nosnippet>231</a>    keys: RwLock&lt;HashMap&lt;String, KeyMaterial&gt;&gt;,
+<a href=#232 id=232 data-nosnippet>232</a>    jwks_kids: RwLock&lt;HashSet&lt;String&gt;&gt;,
+<a href=#233 id=233 data-nosnippet>233</a>    audience: String,
+<a href=#234 id=234 data-nosnippet>234</a>    allowed_issuers: <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt;,
+<a href=#235 id=235 data-nosnippet>235</a>    max_chain_depth: usize,
+<a href=#236 id=236 data-nosnippet>236</a>    leeway_secs: u64,
+<a href=#237 id=237 data-nosnippet>237</a>    revocation: <span class="prelude-ty">Option</span>&lt;std::sync::Arc&lt;<span class="kw">dyn </span><span class="kw">crate</span>::revocation::RevocationStore&gt;&gt;,
+<a href=#238 id=238 data-nosnippet>238</a>    human_subject: <span class="prelude-ty">Option</span>&lt;regex::Regex&gt;,
+<a href=#239 id=239 data-nosnippet>239</a>}
+<a href=#240 id=240 data-nosnippet>240</a>
+<a href=#241 id=241 data-nosnippet>241</a><span class="kw">impl </span>IdentityValidator {
+<a href=#242 id=242 data-nosnippet>242</a>    <span class="doccomment">/// Create a validator for `audience`.
+<a href=#243 id=243 data-nosnippet>243</a>    </span><span class="kw">pub fn </span>new(audience: <span class="kw">impl </span>Into&lt;String&gt;) -&gt; <span class="self">Self </span>{
+<a href=#244 id=244 data-nosnippet>244</a>        <span class="self">Self </span>{
+<a href=#245 id=245 data-nosnippet>245</a>            keys: RwLock::new(HashMap::new()),
+<a href=#246 id=246 data-nosnippet>246</a>            jwks_kids: RwLock::new(HashSet::new()),
+<a href=#247 id=247 data-nosnippet>247</a>            audience: audience.into(),
+<a href=#248 id=248 data-nosnippet>248</a>            allowed_issuers: <span class="prelude-val">None</span>,
+<a href=#249 id=249 data-nosnippet>249</a>            max_chain_depth: <span class="number">4</span>,
+<a href=#250 id=250 data-nosnippet>250</a>            leeway_secs: DEFAULT_LEEWAY_SECS,
+<a href=#251 id=251 data-nosnippet>251</a>            revocation: <span class="prelude-val">None</span>,
+<a href=#252 id=252 data-nosnippet>252</a>            human_subject: <span class="prelude-val">None</span>,
+<a href=#253 id=253 data-nosnippet>253</a>        }
+<a href=#254 id=254 data-nosnippet>254</a>    }
+<a href=#255 id=255 data-nosnippet>255</a>
+<a href=#256 id=256 data-nosnippet>256</a>    <span class="doccomment">/// Require every validated token's `sub` to match `pattern`, so each
+<a href=#257 id=257 data-nosnippet>257</a>    /// agent identity is attributable to a human principal (for example
+<a href=#258 id=258 data-nosnippet>258</a>    /// `^user:` or an identity provider's user-id prefix). Anchor the
+<a href=#259 id=259 data-nosnippet>259</a>    /// pattern: it is matched with `is_match`, anywhere in `sub`.
+<a href=#260 id=260 data-nosnippet>260</a>    </span><span class="kw">pub fn </span>set_human_subject_pattern(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pattern: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;(), IdentityError&gt; {
+<a href=#261 id=261 data-nosnippet>261</a>        <span class="kw">let </span>compiled = regex::RegexBuilder::new(pattern)
+<a href=#262 id=262 data-nosnippet>262</a>            .size_limit(<span class="number">1 </span>&lt;&lt; <span class="number">20</span>)
+<a href=#263 id=263 data-nosnippet>263</a>            .build()
+<a href=#264 id=264 data-nosnippet>264</a>            .map_err(|error| IdentityError::SubjectPattern(error.to_string()))<span class="question-mark">?</span>;
+<a href=#265 id=265 data-nosnippet>265</a>        <span class="self">self</span>.human_subject = <span class="prelude-val">Some</span>(compiled);
+<a href=#266 id=266 data-nosnippet>266</a>        <span class="prelude-val">Ok</span>(())
+<a href=#267 id=267 data-nosnippet>267</a>    }
+<a href=#268 id=268 data-nosnippet>268</a>
+<a href=#269 id=269 data-nosnippet>269</a>    <span class="doccomment">/// True when `sub` satisfies the human-principal rule (always true
+<a href=#270 id=270 data-nosnippet>270</a>    /// when no pattern is configured).
+<a href=#271 id=271 data-nosnippet>271</a>    </span><span class="kw">pub fn </span>subject_is_human(<span class="kw-2">&amp;</span><span class="self">self</span>, sub: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#272 id=272 data-nosnippet>272</a>        <span class="self">self</span>.human_subject
+<a href=#273 id=273 data-nosnippet>273</a>            .as_ref()
+<a href=#274 id=274 data-nosnippet>274</a>            .is_none_or(|pattern| pattern.is_match(sub))
+<a href=#275 id=275 data-nosnippet>275</a>    }
+<a href=#276 id=276 data-nosnippet>276</a>
+<a href=#277 id=277 data-nosnippet>277</a>    <span class="doccomment">/// Register key material under a `kid`.
+<a href=#278 id=278 data-nosnippet>278</a>    ///
+<a href=#279 id=279 data-nosnippet>279</a>    /// Refuse to shadow a JWKS-tracked kid. Without
+<a href=#280 id=280 data-nosnippet>280</a>    /// this guard, an ordering hazard silently discarded operator
+<a href=#281 id=281 data-nosnippet>281</a>    /// intent: if `add_key("X", …)` was called for a kid `X` that
+<a href=#282 id=282 data-nosnippet>282</a>    /// a prior `add_jwks` had installed, the manual entry would
+<a href=#283 id=283 data-nosnippet>283</a>    /// overwrite the JWKS one — but `jwks_kids` still contained
+<a href=#284 id=284 data-nosnippet>284</a>    /// `X`, so the *next* `add_jwks` drain would remove `X` and
+<a href=#285 id=285 data-nosnippet>285</a>    /// reinstall the JWKS version, silently discarding the
+<a href=#286 id=286 data-nosnippet>286</a>    /// operator's manual key. `add_key` is normally a startup
+<a href=#287 id=287 data-nosnippet>287</a>    /// call, but nothing in the API constrained late/admin use.
+<a href=#288 id=288 data-nosnippet>288</a>    </span><span class="kw">pub fn </span>add_key(<span class="kw-2">&amp;</span><span class="self">self</span>, kid: <span class="kw">impl </span>Into&lt;String&gt;, key: KeyMaterial) -&gt; <span class="prelude-ty">Result</span>&lt;(), IdentityError&gt; {
+<a href=#289 id=289 data-nosnippet>289</a>        <span class="kw">let </span>kid = kid.into();
+<a href=#290 id=290 data-nosnippet>290</a>        <span class="comment">// Lock order matches `add_jwks` (keys before jwks_kids) and the
+<a href=#291 id=291 data-nosnippet>291</a>        // keys lock is held across the check AND the insert: releasing
+<a href=#292 id=292 data-nosnippet>292</a>        // between them let a concurrent `add_jwks` install kid X in the
+<a href=#293 id=293 data-nosnippet>293</a>        // gap, after which this insert silently shadowed the JWKS entry —
+<a href=#294 id=294 data-nosnippet>294</a>        // exactly the ordering hazard this guard exists to refuse.
+<a href=#295 id=295 data-nosnippet>295</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>loaded = <span class="self">self</span>.keys.write();
+<a href=#296 id=296 data-nosnippet>296</a>        <span class="kw">let </span>prior = <span class="self">self</span>.jwks_kids.read();
+<a href=#297 id=297 data-nosnippet>297</a>        <span class="kw">if </span>prior.contains(<span class="kw-2">&amp;</span>kid) {
+<a href=#298 id=298 data-nosnippet>298</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Jwks(<span class="macro">format!</span>(
+<a href=#299 id=299 data-nosnippet>299</a>                <span class="string">"manual kid {kid:?} conflicts with a JWKS-tracked kid; rotate JWKS first"
+<a href=#300 id=300 data-nosnippet>300</a>            </span>)));
+<a href=#301 id=301 data-nosnippet>301</a>        }
+<a href=#302 id=302 data-nosnippet>302</a>        drop(prior);
+<a href=#303 id=303 data-nosnippet>303</a>        loaded.insert(kid, key);
+<a href=#304 id=304 data-nosnippet>304</a>        <span class="prelude-val">Ok</span>(())
+<a href=#305 id=305 data-nosnippet>305</a>    }
+<a href=#306 id=306 data-nosnippet>306</a>
+<a href=#307 id=307 data-nosnippet>307</a>    <span class="doccomment">/// Add all supported Ed25519 keys from a standard JWKS document. Keys
+<a href=#308 id=308 data-nosnippet>308</a>    /// loaded by a *previous* `add_jwks` call are retired (replace
+<a href=#309 id=309 data-nosnippet>309</a>    /// semantics, so IdP rotation drops superseded JWKS keys); keys
+<a href=#310 id=310 data-nosnippet>310</a>    /// registered manually via `add_key` are left untouched, and a JWKS
+<a href=#311 id=311 data-nosnippet>311</a>    /// entry whose `kid` collides with a manually-registered key is
+<a href=#312 id=312 data-nosnippet>312</a>    /// refused so the manual key stays authoritative.
+<a href=#313 id=313 data-nosnippet>313</a>    </span><span class="kw">pub fn </span>add_jwks(<span class="kw-2">&amp;</span><span class="self">self</span>, document: <span class="kw-2">&amp;</span>serde_json::Value) -&gt; <span class="prelude-ty">Result</span>&lt;usize, IdentityError&gt; {
+<a href=#314 id=314 data-nosnippet>314</a>        <span class="comment">// Cap the total number of
+<a href=#315 id=315 data-nosnippet>315</a>        // entries iterated (parsed OR skipped), so a hostile JWKS
+<a href=#316 id=316 data-nosnippet>316</a>        // full of RSA/EC decoys with a handful of legitimate OKP
+<a href=#317 id=317 data-nosnippet>317</a>        // keys cannot stall the parse loop just by inflating the
+<a href=#318 id=318 data-nosnippet>318</a>        // `keys` array to tens of thousands of entries. An
+<a href=#319 id=319 data-nosnippet>319</a>        // earlier fix only capped parsed OKP entries, so a JWKS
+<a href=#320 id=320 data-nosnippet>320</a>        // with 40k `kty=RSA` decoys still walked the whole array.
+<a href=#321 id=321 data-nosnippet>321</a>        // Cap the outer array up front at the same threshold, and
+<a href=#322 id=322 data-nosnippet>322</a>        // keep the inner cap as defense-in-depth against a future
+<a href=#323 id=323 data-nosnippet>323</a>        // parser that stops short-circuiting on non-Ed25519 entries.
+<a href=#324 id=324 data-nosnippet>324</a>        </span><span class="kw">const </span>MAX_JWKS_KEYS: usize = <span class="number">256</span>;
+<a href=#325 id=325 data-nosnippet>325</a>        <span class="kw">let </span>keys = document
+<a href=#326 id=326 data-nosnippet>326</a>            .get(<span class="string">"keys"</span>)
+<a href=#327 id=327 data-nosnippet>327</a>            .and_then(serde_json::Value::as_array)
+<a href=#328 id=328 data-nosnippet>328</a>            .ok_or_else(|| IdentityError::Jwks(<span class="string">"missing keys array"</span>.to_owned()))<span class="question-mark">?</span>;
+<a href=#329 id=329 data-nosnippet>329</a>        <span class="kw">if </span>keys.len() &gt; MAX_JWKS_KEYS {
+<a href=#330 id=330 data-nosnippet>330</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Jwks(<span class="macro">format!</span>(
+<a href=#331 id=331 data-nosnippet>331</a>                <span class="string">"JWKS keys array carries {} entries; refusing to walk more than {MAX_JWKS_KEYS} (this cap fires before the inner parser regardless of `kty`)"</span>,
+<a href=#332 id=332 data-nosnippet>332</a>                keys.len()
+<a href=#333 id=333 data-nosnippet>333</a>            )));
+<a href=#334 id=334 data-nosnippet>334</a>        }
+<a href=#335 id=335 data-nosnippet>335</a>        <span class="kw">let </span><span class="kw-2">mut </span>parsed = Vec::new();
+<a href=#336 id=336 data-nosnippet>336</a>        <span class="comment">// Refuse duplicate `kid` within a single JWKS.
+<a href=#337 id=337 data-nosnippet>337</a>        // HashMap's insert-with-overwrite semantics would otherwise
+<a href=#338 id=338 data-nosnippet>338</a>        // silently accept a poisoned refresh where an attacker mixes
+<a href=#339 id=339 data-nosnippet>339</a>        // an alien public key with the same kid as a legitimate one —
+<a href=#340 id=340 data-nosnippet>340</a>        // the array's LAST entry silently wins verification with no
+<a href=#341 id=341 data-nosnippet>341</a>        // log line, no counter, no error.
+<a href=#342 id=342 data-nosnippet>342</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>seen: std::collections::HashSet&lt;String&gt; = std::collections::HashSet::new();
+<a href=#343 id=343 data-nosnippet>343</a>        <span class="kw">for </span>key <span class="kw">in </span>keys {
+<a href=#344 id=344 data-nosnippet>344</a>            <span class="kw">if </span>key.get(<span class="string">"kty"</span>).and_then(serde_json::Value::as_str) != <span class="prelude-val">Some</span>(<span class="string">"OKP"</span>)
+<a href=#345 id=345 data-nosnippet>345</a>                || key.get(<span class="string">"crv"</span>).and_then(serde_json::Value::as_str) != <span class="prelude-val">Some</span>(<span class="string">"Ed25519"</span>)
+<a href=#346 id=346 data-nosnippet>346</a>            {
+<a href=#347 id=347 data-nosnippet>347</a>                <span class="kw">continue</span>;
+<a href=#348 id=348 data-nosnippet>348</a>            }
+<a href=#349 id=349 data-nosnippet>349</a>            <span class="comment">// Respect RFC 7517 §4.2/§4.4. A JWK's
+<a href=#350 id=350 data-nosnippet>350</a>            // `use` (public key use) member — when present — MUST
+<a href=#351 id=351 data-nosnippet>351</a>            // be "sig" for verification material; "enc" keys are
+<a href=#352 id=352 data-nosnippet>352</a>            // encryption-only and MUST NOT be installed for
+<a href=#353 id=353 data-nosnippet>353</a>            // signature verification. Similarly `alg` — when
+<a href=#354 id=354 data-nosnippet>354</a>            // present — MUST identify the algorithm intended for
+<a href=#355 id=355 data-nosnippet>355</a>            // this key. For OKP/Ed25519 that's exclusively
+<a href=#356 id=356 data-nosnippet>356</a>            // "EdDSA" (RFC 8037 §3.1). An IdP that ships an
+<a href=#357 id=357 data-nosnippet>357</a>            // encryption-only key with a signing-domain kid
+<a href=#358 id=358 data-nosnippet>358</a>            // (misconfig or partial compromise) would otherwise
+<a href=#359 id=359 data-nosnippet>359</a>            // be silently installed as a verifier. Signature
+<a href=#360 id=360 data-nosnippet>360</a>            // correctness is still protected by the alg/kty
+<a href=#361 id=361 data-nosnippet>361</a>            // check at verify time, so this is defence-in-depth
+<a href=#362 id=362 data-nosnippet>362</a>            // rather than a direct forgery close, but it aligns
+<a href=#363 id=363 data-nosnippet>363</a>            // with the IdP's stated policy so audits can rely on
+<a href=#364 id=364 data-nosnippet>364</a>            // it.
+<a href=#365 id=365 data-nosnippet>365</a>            </span><span class="kw">let </span>kid_for_diag = key
+<a href=#366 id=366 data-nosnippet>366</a>                .get(<span class="string">"kid"</span>)
+<a href=#367 id=367 data-nosnippet>367</a>                .and_then(serde_json::Value::as_str)
+<a href=#368 id=368 data-nosnippet>368</a>                .unwrap_or(<span class="string">"&lt;missing&gt;"</span>);
+<a href=#369 id=369 data-nosnippet>369</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(use_) = key.get(<span class="string">"use"</span>) {
+<a href=#370 id=370 data-nosnippet>370</a>                <span class="kw">if </span>use_.as_str() != <span class="prelude-val">Some</span>(<span class="string">"sig"</span>) {
+<a href=#371 id=371 data-nosnippet>371</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Jwks(<span class="macro">format!</span>(
+<a href=#372 id=372 data-nosnippet>372</a>                        <span class="string">"kid {kid_for_diag:?} declares use={use_:?}; only \"sig\" is accepted"
+<a href=#373 id=373 data-nosnippet>373</a>                    </span>)));
+<a href=#374 id=374 data-nosnippet>374</a>                }
+<a href=#375 id=375 data-nosnippet>375</a>            }
+<a href=#376 id=376 data-nosnippet>376</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(alg) = key.get(<span class="string">"alg"</span>) {
+<a href=#377 id=377 data-nosnippet>377</a>                <span class="kw">if </span>alg.as_str() != <span class="prelude-val">Some</span>(<span class="string">"EdDSA"</span>) {
+<a href=#378 id=378 data-nosnippet>378</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Jwks(<span class="macro">format!</span>(
+<a href=#379 id=379 data-nosnippet>379</a>                        <span class="string">"kid {kid_for_diag:?} declares alg={alg:?}; only \"EdDSA\" is accepted for OKP/Ed25519"
+<a href=#380 id=380 data-nosnippet>380</a>                    </span>)));
+<a href=#381 id=381 data-nosnippet>381</a>                }
+<a href=#382 id=382 data-nosnippet>382</a>            }
+<a href=#383 id=383 data-nosnippet>383</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(operations) = key.get(<span class="string">"key_ops"</span>) {
+<a href=#384 id=384 data-nosnippet>384</a>                <span class="kw">let </span><span class="prelude-val">Some</span>(operations) = operations.as_array() <span class="kw">else </span>{
+<a href=#385 id=385 data-nosnippet>385</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Jwks(<span class="macro">format!</span>(
+<a href=#386 id=386 data-nosnippet>386</a>                        <span class="string">"kid {kid_for_diag:?} key_ops must be an array"
+<a href=#387 id=387 data-nosnippet>387</a>                    </span>)));
+<a href=#388 id=388 data-nosnippet>388</a>                };
+<a href=#389 id=389 data-nosnippet>389</a>                <span class="kw">let </span><span class="kw-2">mut </span>seen_operations = HashSet::new();
+<a href=#390 id=390 data-nosnippet>390</a>                <span class="kw">if </span>operations.iter().any(|operation| {
+<a href=#391 id=391 data-nosnippet>391</a>                    operation
+<a href=#392 id=392 data-nosnippet>392</a>                        .as_str()
+<a href=#393 id=393 data-nosnippet>393</a>                        .is_none_or(|operation| !seen_operations.insert(operation))
+<a href=#394 id=394 data-nosnippet>394</a>                }) || !seen_operations.contains(<span class="string">"verify"</span>)
+<a href=#395 id=395 data-nosnippet>395</a>                {
+<a href=#396 id=396 data-nosnippet>396</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Jwks(<span class="macro">format!</span>(
+<a href=#397 id=397 data-nosnippet>397</a>                        <span class="string">"kid {kid_for_diag:?} key_ops must contain unique strings and permit verify"
+<a href=#398 id=398 data-nosnippet>398</a>                    </span>)));
+<a href=#399 id=399 data-nosnippet>399</a>                }
+<a href=#400 id=400 data-nosnippet>400</a>            }
+<a href=#401 id=401 data-nosnippet>401</a>            <span class="kw">let </span>kid = key
+<a href=#402 id=402 data-nosnippet>402</a>                .get(<span class="string">"kid"</span>)
+<a href=#403 id=403 data-nosnippet>403</a>                .and_then(serde_json::Value::as_str)
+<a href=#404 id=404 data-nosnippet>404</a>                .filter(|value| !value.is_empty())
+<a href=#405 id=405 data-nosnippet>405</a>                .ok_or_else(|| IdentityError::Jwks(<span class="string">"Ed25519 key missing kid"</span>.to_owned()))<span class="question-mark">?</span>;
+<a href=#406 id=406 data-nosnippet>406</a>            <span class="kw">if </span>!seen.insert(kid.to_owned()) {
+<a href=#407 id=407 data-nosnippet>407</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Jwks(<span class="macro">format!</span>(
+<a href=#408 id=408 data-nosnippet>408</a>                    <span class="string">"duplicate kid {kid:?} in JWKS document; refusing to accept a poisoned key set"
+<a href=#409 id=409 data-nosnippet>409</a>                </span>)));
+<a href=#410 id=410 data-nosnippet>410</a>            }
+<a href=#411 id=411 data-nosnippet>411</a>            <span class="kw">let </span>x = key
+<a href=#412 id=412 data-nosnippet>412</a>                .get(<span class="string">"x"</span>)
+<a href=#413 id=413 data-nosnippet>413</a>                .and_then(serde_json::Value::as_str)
+<a href=#414 id=414 data-nosnippet>414</a>                .filter(|value| !value.is_empty())
+<a href=#415 id=415 data-nosnippet>415</a>                .ok_or_else(|| IdentityError::Jwks(<span class="macro">format!</span>(<span class="string">"key {kid:?} missing x"</span>)))<span class="question-mark">?</span>;
+<a href=#416 id=416 data-nosnippet>416</a>            <span class="comment">// Shape-check the key at load time. Without
+<a href=#417 id=417 data-nosnippet>417</a>            // this, a malformed base64url `x` (e.g., "!!!") or a
+<a href=#418 id=418 data-nosnippet>418</a>            // wrong-length pubkey installs successfully, then every
+<a href=#419 id=419 data-nosnippet>419</a>            // JWT with that kid fails at verify time with a confusing
+<a href=#420 id=420 data-nosnippet>420</a>            // "bad JWK for kid" error. Rejecting during `add_jwks`
+<a href=#421 id=421 data-nosnippet>421</a>            // surfaces operator config errors at boot/JWKS refresh
+<a href=#422 id=422 data-nosnippet>422</a>            // instead of silently poisoning every downstream request.
+<a href=#423 id=423 data-nosnippet>423</a>            </span><span class="kw">let </span>decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+<a href=#424 id=424 data-nosnippet>424</a>                .decode(x)
+<a href=#425 id=425 data-nosnippet>425</a>                .map_err(|error| {
+<a href=#426 id=426 data-nosnippet>426</a>                    IdentityError::Jwks(<span class="macro">format!</span>(<span class="string">"key {kid:?} has malformed base64url `x`: {error}"</span>))
+<a href=#427 id=427 data-nosnippet>427</a>                })<span class="question-mark">?</span>;
+<a href=#428 id=428 data-nosnippet>428</a>            <span class="kw">if </span>decoded.len() != <span class="number">32 </span>{
+<a href=#429 id=429 data-nosnippet>429</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Jwks(<span class="macro">format!</span>(
+<a href=#430 id=430 data-nosnippet>430</a>                    <span class="string">"key {kid:?} `x` decodes to {} bytes; Ed25519 public keys must be exactly 32"</span>,
+<a href=#431 id=431 data-nosnippet>431</a>                    decoded.len()
+<a href=#432 id=432 data-nosnippet>432</a>                )));
+<a href=#433 id=433 data-nosnippet>433</a>            }
+<a href=#434 id=434 data-nosnippet>434</a>            parsed.push((kid.to_owned(), KeyMaterial::Ed25519Jwk(x.to_owned())));
+<a href=#435 id=435 data-nosnippet>435</a>            <span class="comment">// The outer `keys.len() &gt; MAX_JWKS_KEYS`
+<a href=#436 id=436 data-nosnippet>436</a>            // guard at the top of the function already bounds
+<a href=#437 id=437 data-nosnippet>437</a>            // `parsed.len()` (parsed is a subset of the outer
+<a href=#438 id=438 data-nosnippet>438</a>            // array). This inner check is therefore unreachable in
+<a href=#439 id=439 data-nosnippet>439</a>            // practice — kept as defense-in-depth so a future
+<a href=#440 id=440 data-nosnippet>440</a>            // refactor that drops the outer guard cannot silently
+<a href=#441 id=441 data-nosnippet>441</a>            // reopen the write-lock stall vector.
+<a href=#442 id=442 data-nosnippet>442</a>            </span><span class="macro">debug_assert!</span>(
+<a href=#443 id=443 data-nosnippet>443</a>                parsed.len() &lt;= MAX_JWKS_KEYS,
+<a href=#444 id=444 data-nosnippet>444</a>                <span class="string">"outer keys.len() cap should have already refused this document"
+<a href=#445 id=445 data-nosnippet>445</a>            </span>);
+<a href=#446 id=446 data-nosnippet>446</a>            <span class="kw">if </span>parsed.len() &gt; MAX_JWKS_KEYS {
+<a href=#447 id=447 data-nosnippet>447</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Jwks(<span class="macro">format!</span>(
+<a href=#448 id=448 data-nosnippet>448</a>                    <span class="string">"JWKS declares more than {MAX_JWKS_KEYS} Ed25519 OKP keys; refusing to install"
+<a href=#449 id=449 data-nosnippet>449</a>                </span>)));
+<a href=#450 id=450 data-nosnippet>450</a>            }
+<a href=#451 id=451 data-nosnippet>451</a>        }
+<a href=#452 id=452 data-nosnippet>452</a>        <span class="kw">if </span>parsed.is_empty() {
+<a href=#453 id=453 data-nosnippet>453</a>            <span class="comment">// An explicitly-EMPTY `keys` array is authoritative
+<a href=#454 id=454 data-nosnippet>454</a>            // revocation: the key owner withdrew every signing key
+<a href=#455 id=455 data-nosnippet>455</a>            // (compromise response). The old blanket error here made
+<a href=#456 id=456 data-nosnippet>456</a>            // revocation impossible — every refresh failed and the
+<a href=#457 id=457 data-nosnippet>457</a>            // cached keys verified compromised-key tokens forever.
+<a href=#458 id=458 data-nosnippet>458</a>            // Retiring the JWKS-tracked keys fails closed: with no
+<a href=#459 id=459 data-nosnippet>459</a>            // usable keys, every token is refused until the endpoint
+<a href=#460 id=460 data-nosnippet>460</a>            // publishes keys again. A NON-empty document with zero
+<a href=#461 id=461 data-nosnippet>461</a>            // usable Ed25519 OKP entries stays an error (that shape is
+<a href=#462 id=462 data-nosnippet>462</a>            // a misconfigured endpoint — RSA-only, malformed — not a
+<a href=#463 id=463 data-nosnippet>463</a>            // deliberate withdrawal), so a broken rotation keeps the
+<a href=#464 id=464 data-nosnippet>464</a>            // last-known-good keys rather than dropping enforcement
+<a href=#465 id=465 data-nosnippet>465</a>            // into refuse-everything.
+<a href=#466 id=466 data-nosnippet>466</a>            </span><span class="kw">if </span>keys.is_empty() {
+<a href=#467 id=467 data-nosnippet>467</a>                <span class="kw">let </span><span class="kw-2">mut </span>loaded = <span class="self">self</span>.keys.write();
+<a href=#468 id=468 data-nosnippet>468</a>                <span class="kw">let </span><span class="kw-2">mut </span>prior = <span class="self">self</span>.jwks_kids.write();
+<a href=#469 id=469 data-nosnippet>469</a>                <span class="kw">for </span>kid <span class="kw">in </span>prior.drain() {
+<a href=#470 id=470 data-nosnippet>470</a>                    loaded.remove(<span class="kw-2">&amp;</span>kid);
+<a href=#471 id=471 data-nosnippet>471</a>                }
+<a href=#472 id=472 data-nosnippet>472</a>                <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="number">0</span>);
+<a href=#473 id=473 data-nosnippet>473</a>            }
+<a href=#474 id=474 data-nosnippet>474</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Jwks(<span class="string">"no Ed25519 OKP keys found"</span>.to_owned()));
+<a href=#475 id=475 data-nosnippet>475</a>        }
+<a href=#476 id=476 data-nosnippet>476</a>        <span class="kw">let </span><span class="kw-2">mut </span>loaded = <span class="self">self</span>.keys.write();
+<a href=#477 id=477 data-nosnippet>477</a>        <span class="kw">let </span><span class="kw-2">mut </span>prior = <span class="self">self</span>.jwks_kids.write();
+<a href=#478 id=478 data-nosnippet>478</a>        <span class="comment">// A manually-added key must not be silently converted to a
+<a href=#479 id=479 data-nosnippet>479</a>        // JWKS-tracked entry: without this refusal, the next JWKS refresh
+<a href=#480 id=480 data-nosnippet>480</a>        // that no longer carries the colliding kid would retire (delete)
+<a href=#481 id=481 data-nosnippet>481</a>        // an operator-configured key. Report the conflict — the operator
+<a href=#482 id=482 data-nosnippet>482</a>        // can rename either side.
+<a href=#483 id=483 data-nosnippet>483</a>        </span><span class="kw">for </span>(kid, <span class="kw">_</span>) <span class="kw">in </span><span class="kw-2">&amp;</span>parsed {
+<a href=#484 id=484 data-nosnippet>484</a>            <span class="kw">if </span>loaded.contains_key(kid) &amp;&amp; !prior.contains(kid) {
+<a href=#485 id=485 data-nosnippet>485</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Jwks(<span class="macro">format!</span>(
+<a href=#486 id=486 data-nosnippet>486</a>                    <span class="string">"JWKS kid {kid:?} conflicts with a manually-registered key; rename one"
+<a href=#487 id=487 data-nosnippet>487</a>                </span>)));
+<a href=#488 id=488 data-nosnippet>488</a>            }
+<a href=#489 id=489 data-nosnippet>489</a>        }
+<a href=#490 id=490 data-nosnippet>490</a>        <span class="kw">for </span>kid <span class="kw">in </span>prior.drain() {
+<a href=#491 id=491 data-nosnippet>491</a>            loaded.remove(<span class="kw-2">&amp;</span>kid);
+<a href=#492 id=492 data-nosnippet>492</a>        }
+<a href=#493 id=493 data-nosnippet>493</a>        <span class="kw">for </span>(kid, material) <span class="kw">in </span><span class="kw-2">&amp;</span>parsed {
+<a href=#494 id=494 data-nosnippet>494</a>            loaded.insert(kid.clone(), material.clone());
+<a href=#495 id=495 data-nosnippet>495</a>            prior.insert(kid.clone());
+<a href=#496 id=496 data-nosnippet>496</a>        }
+<a href=#497 id=497 data-nosnippet>497</a>        <span class="prelude-val">Ok</span>(parsed.len())
+<a href=#498 id=498 data-nosnippet>498</a>    }
+<a href=#499 id=499 data-nosnippet>499</a>
+<a href=#500 id=500 data-nosnippet>500</a>    <span class="doccomment">/// Number of verification keys currently loaded.
+<a href=#501 id=501 data-nosnippet>501</a>    </span><span class="kw">pub fn </span>key_count(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#502 id=502 data-nosnippet>502</a>        <span class="self">self</span>.keys.read().len()
+<a href=#503 id=503 data-nosnippet>503</a>    }
+<a href=#504 id=504 data-nosnippet>504</a>
+<a href=#505 id=505 data-nosnippet>505</a>    <span class="doccomment">/// Restrict accepted issuers.
+<a href=#506 id=506 data-nosnippet>506</a>    </span><span class="kw">pub fn </span>allow_issuers(<span class="kw-2">&amp;mut </span><span class="self">self</span>, issuers: Vec&lt;String&gt;) {
+<a href=#507 id=507 data-nosnippet>507</a>        <span class="self">self</span>.allowed_issuers = <span class="prelude-val">Some</span>(issuers);
+<a href=#508 id=508 data-nosnippet>508</a>    }
+<a href=#509 id=509 data-nosnippet>509</a>
+<a href=#510 id=510 data-nosnippet>510</a>    <span class="doccomment">/// Override the delegation-depth cap (default 4).
+<a href=#511 id=511 data-nosnippet>511</a>    </span><span class="kw">pub fn </span>set_max_chain_depth(<span class="kw-2">&amp;mut </span><span class="self">self</span>, depth: usize) {
+<a href=#512 id=512 data-nosnippet>512</a>        <span class="self">self</span>.max_chain_depth = depth;
+<a href=#513 id=513 data-nosnippet>513</a>    }
+<a href=#514 id=514 data-nosnippet>514</a>
+<a href=#515 id=515 data-nosnippet>515</a>    <span class="doccomment">/// Clock tolerance used when checking token timestamps.
+<a href=#516 id=516 data-nosnippet>516</a>    </span><span class="kw">pub fn </span>leeway_secs(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+<a href=#517 id=517 data-nosnippet>517</a>        <span class="self">self</span>.leeway_secs
+<a href=#518 id=518 data-nosnippet>518</a>    }
+<a href=#519 id=519 data-nosnippet>519</a>
+<a href=#520 id=520 data-nosnippet>520</a>    <span class="doccomment">/// Attach a JTI revocation store. When set, the `jti` of every
+<a href=#521 id=521 data-nosnippet>521</a>    /// validated token, and of every token in its delegation chain, is
+<a href=#522 id=522 data-nosnippet>522</a>    /// checked against the store; revoked tokens are refused with
+<a href=#523 id=523 data-nosnippet>523</a>    /// `IdentityError::Revoked`.
+<a href=#524 id=524 data-nosnippet>524</a>    </span><span class="kw">pub fn </span>set_revocation_store(<span class="kw-2">&amp;mut </span><span class="self">self</span>, store: std::sync::Arc&lt;<span class="kw">dyn </span><span class="kw">crate</span>::revocation::RevocationStore&gt;) {
+<a href=#525 id=525 data-nosnippet>525</a>        <span class="self">self</span>.revocation = <span class="prelude-val">Some</span>(store);
+<a href=#526 id=526 data-nosnippet>526</a>    }
+<a href=#527 id=527 data-nosnippet>527</a>
+<a href=#528 id=528 data-nosnippet>528</a>    <span class="doccomment">/// The attached revocation store, so a revocation endpoint writes to
+<a href=#529 id=529 data-nosnippet>529</a>    /// the same list this validator reads.
+<a href=#530 id=530 data-nosnippet>530</a>    </span><span class="kw">pub fn </span>revocation_store(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>std::sync::Arc&lt;<span class="kw">dyn </span><span class="kw">crate</span>::revocation::RevocationStore&gt;&gt; {
+<a href=#531 id=531 data-nosnippet>531</a>        <span class="self">self</span>.revocation.as_ref()
+<a href=#532 id=532 data-nosnippet>532</a>    }
+<a href=#533 id=533 data-nosnippet>533</a>
+<a href=#534 id=534 data-nosnippet>534</a>    <span class="doccomment">/// Must run only after the token's signature verified, so an attacker
+<a href=#535 id=535 data-nosnippet>535</a>    /// cannot probe the revocation list with unsigned tokens.
+<a href=#536 id=536 data-nosnippet>536</a>    </span><span class="kw">fn </span>check_not_revoked(<span class="kw-2">&amp;</span><span class="self">self</span>, claims: <span class="kw-2">&amp;</span>NhiClaims) -&gt; <span class="prelude-ty">Result</span>&lt;(), IdentityError&gt; {
+<a href=#537 id=537 data-nosnippet>537</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(store) = <span class="kw-2">&amp;</span><span class="self">self</span>.revocation <span class="kw">else </span>{
+<a href=#538 id=538 data-nosnippet>538</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#539 id=539 data-nosnippet>539</a>        };
+<a href=#540 id=540 data-nosnippet>540</a>        <span class="kw">match </span>store.check_token(<span class="kw-2">&amp;</span>claims.iss, <span class="kw-2">&amp;</span>claims.jti, <span class="kw-2">&amp;</span>claims.instance_uid, claims.iat) {
+<a href=#541 id=541 data-nosnippet>541</a>            <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Ok</span>(()),
+<a href=#542 id=542 data-nosnippet>542</a>            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(RevokedBy::Jti)) =&gt; <span class="prelude-val">Err</span>(IdentityError::Revoked(claims.jti.clone())),
+<a href=#543 id=543 data-nosnippet>543</a>            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(RevokedBy::Instance { cutoff })) =&gt; <span class="prelude-val">Err</span>(IdentityError::InstanceRevoked {
+<a href=#544 id=544 data-nosnippet>544</a>                instance_uid: claims.instance_uid.clone(),
+<a href=#545 id=545 data-nosnippet>545</a>                cutoff,
+<a href=#546 id=546 data-nosnippet>546</a>            }),
+<a href=#547 id=547 data-nosnippet>547</a>            <span class="prelude-val">Err</span>(error) =&gt; <span class="prelude-val">Err</span>(IdentityError::RevocationUnavailable(error)),
+<a href=#548 id=548 data-nosnippet>548</a>        }
+<a href=#549 id=549 data-nosnippet>549</a>    }
+<a href=#550 id=550 data-nosnippet>550</a>
+<a href=#551 id=551 data-nosnippet>551</a>    <span class="doccomment">/// Validate a token and its full delegation chain.
+<a href=#552 id=552 data-nosnippet>552</a>    </span><span class="kw">pub fn </span>validate(<span class="kw-2">&amp;</span><span class="self">self</span>, token: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;ValidatedIdentity, IdentityError&gt; {
+<a href=#553 id=553 data-nosnippet>553</a>        <span class="self">self</span>.validate_inner(token, <span class="bool-val">false</span>)
+<a href=#554 id=554 data-nosnippet>554</a>    }
+<a href=#555 id=555 data-nosnippet>555</a>
+<a href=#556 id=556 data-nosnippet>556</a>    <span class="doccomment">/// Authenticate a holder revocation request, including an already-revoked
+<a href=#557 id=557 data-nosnippet>557</a>    /// token or a token scheduled within the next maximum token lifetime.
+<a href=#558 id=558 data-nosnippet>558</a>    /// Future activation is allowed only for revocation; it never grants access.
+<a href=#559 id=559 data-nosnippet>559</a>    </span><span class="kw">pub fn </span>validate_for_revocation(<span class="kw-2">&amp;</span><span class="self">self</span>, token: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;ValidatedIdentity, IdentityError&gt; {
+<a href=#560 id=560 data-nosnippet>560</a>        <span class="self">self</span>.validate_inner(token, <span class="bool-val">true</span>)
+<a href=#561 id=561 data-nosnippet>561</a>    }
+<a href=#562 id=562 data-nosnippet>562</a>
+<a href=#563 id=563 data-nosnippet>563</a>    <span class="kw">fn </span>validate_inner(<span class="kw-2">&amp;</span><span class="self">self</span>, token: <span class="kw-2">&amp;</span>str, for_revocation: bool) -&gt; <span class="prelude-ty">Result</span>&lt;ValidatedIdentity, IdentityError&gt; {
+<a href=#564 id=564 data-nosnippet>564</a>        <span class="kw">let </span>leaf = <span class="self">self</span>.validate_single(token, for_revocation)<span class="question-mark">?</span>;
+<a href=#565 id=565 data-nosnippet>565</a>        <span class="kw">if </span>!for_revocation {
+<a href=#566 id=566 data-nosnippet>566</a>            <span class="self">self</span>.check_not_revoked(<span class="kw-2">&amp;</span>leaf)<span class="question-mark">?</span>;
+<a href=#567 id=567 data-nosnippet>567</a>            <span class="comment">// Holder revocation stays possible for any token; only access
+<a href=#568 id=568 data-nosnippet>568</a>            // requires a human-attributable subject.
+<a href=#569 id=569 data-nosnippet>569</a>            </span><span class="kw">if </span>!<span class="self">self</span>.subject_is_human(<span class="kw-2">&amp;</span>leaf.sub) {
+<a href=#570 id=570 data-nosnippet>570</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::SubjectNotHuman);
+<a href=#571 id=571 data-nosnippet>571</a>            }
+<a href=#572 id=572 data-nosnippet>572</a>        }
+<a href=#573 id=573 data-nosnippet>573</a>        <span class="kw">let </span><span class="kw-2">mut </span>chain_tokens = <span class="macro">vec!</span>[RevocationIdentity::from(<span class="kw-2">&amp;</span>leaf)];
+<a href=#574 id=574 data-nosnippet>574</a>
+<a href=#575 id=575 data-nosnippet>575</a>        <span class="comment">// Check act claim nesting depth against the same cap as parent_token
+<a href=#576 id=576 data-nosnippet>576</a>        // chains. The total delegation depth = parent_token links + act nesting.
+<a href=#577 id=577 data-nosnippet>577</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>act_depth = leaf.act.as_ref().map_or(<span class="number">0</span>, |a| <span class="number">1 </span>+ a.depth());
+<a href=#578 id=578 data-nosnippet>578</a>        <span class="kw">if </span>act_depth &gt; <span class="self">self</span>.max_chain_depth {
+<a href=#579 id=579 data-nosnippet>579</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::ChainTooDeep(<span class="self">self</span>.max_chain_depth));
+<a href=#580 id=580 data-nosnippet>580</a>        }
+<a href=#581 id=581 data-nosnippet>581</a>
+<a href=#582 id=582 data-nosnippet>582</a>        <span class="kw">let </span><span class="kw-2">mut </span>depth = <span class="number">0usize</span>;
+<a href=#583 id=583 data-nosnippet>583</a>        <span class="kw">let </span><span class="kw-2">mut </span>child = leaf.clone();
+<a href=#584 id=584 data-nosnippet>584</a>        <span class="kw">let </span><span class="kw-2">mut </span>parent_token = leaf.parent_token.clone();
+<a href=#585 id=585 data-nosnippet>585</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>(pt) = parent_token {
+<a href=#586 id=586 data-nosnippet>586</a>            depth += <span class="number">1</span>;
+<a href=#587 id=587 data-nosnippet>587</a>            <span class="kw">let </span>total = depth + act_depth;
+<a href=#588 id=588 data-nosnippet>588</a>            <span class="kw">if </span>total &gt; <span class="self">self</span>.max_chain_depth {
+<a href=#589 id=589 data-nosnippet>589</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::ChainTooDeep(<span class="self">self</span>.max_chain_depth));
+<a href=#590 id=590 data-nosnippet>590</a>            }
+<a href=#591 id=591 data-nosnippet>591</a>            <span class="kw">let </span>parent = <span class="self">self</span>.validate_single(<span class="kw-2">&amp;</span>pt, for_revocation)<span class="question-mark">?</span>;
+<a href=#592 id=592 data-nosnippet>592</a>            act_depth += parent.act.as_ref().map_or(<span class="number">0</span>, |a| <span class="number">1 </span>+ a.depth());
+<a href=#593 id=593 data-nosnippet>593</a>            <span class="kw">if </span>depth + act_depth &gt; <span class="self">self</span>.max_chain_depth {
+<a href=#594 id=594 data-nosnippet>594</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::ChainTooDeep(<span class="self">self</span>.max_chain_depth));
+<a href=#595 id=595 data-nosnippet>595</a>            }
+<a href=#596 id=596 data-nosnippet>596</a>            chain_tokens.push(RevocationIdentity::from(<span class="kw-2">&amp;</span>parent));
+<a href=#597 id=597 data-nosnippet>597</a>            <span class="comment">// Revoking a delegator must cut off every token it delegated.
+<a href=#598 id=598 data-nosnippet>598</a>            </span><span class="kw">if </span>!for_revocation {
+<a href=#599 id=599 data-nosnippet>599</a>                <span class="self">self</span>.check_not_revoked(<span class="kw-2">&amp;</span>parent)<span class="question-mark">?</span>;
+<a href=#600 id=600 data-nosnippet>600</a>            }
+<a href=#601 id=601 data-nosnippet>601</a>            <span class="comment">// Scope inheritance: child ⊆ parent, with the SAME wildcard
+<a href=#602 id=602 data-nosnippet>602</a>            // semantics the harness's runtime authorization uses
+<a href=#603 id=603 data-nosnippet>603</a>            // (`pv-harness::pipeline::scope_allows`). Do not use
+<a href=#604 id=604 data-nosnippet>604</a>            // exact-string equality here: it rejected legitimately-delegated
+<a href=#605 id=605 data-nosnippet>605</a>            // narrower scopes when the parent held a wildcard — e.g.,
+<a href=#606 id=606 data-nosnippet>606</a>            // parent `["tool:*"]`, child `["tool:db_write"]` was refused
+<a href=#607 id=607 data-nosnippet>607</a>            // as `ScopeEscalation("tool:db_write")` even though the
+<a href=#608 id=608 data-nosnippet>608</a>            // runtime gate would authorize it, so the delegation
+<a href=#609 id=609 data-nosnippet>609</a>            // machinery was strictly stricter than the authorization
+<a href=#610 id=610 data-nosnippet>610</a>            // machinery. That asymmetry made wildcard-parent tokens
+<a href=#611 id=611 data-nosnippet>611</a>            // effectively unusable for narrowing delegation, the
+<a href=#612 id=612 data-nosnippet>612</a>            // canonical use case for scope subsetting.
+<a href=#613 id=613 data-nosnippet>613</a>            </span><span class="kw">if let </span><span class="prelude-val">Some</span>(escalated) = child
+<a href=#614 id=614 data-nosnippet>614</a>                .scopes
+<a href=#615 id=615 data-nosnippet>615</a>                .iter()
+<a href=#616 id=616 data-nosnippet>616</a>                .find(|scope| !scope_covered_by(scope, <span class="kw-2">&amp;</span>parent.scopes))
+<a href=#617 id=617 data-nosnippet>617</a>            {
+<a href=#618 id=618 data-nosnippet>618</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::ScopeEscalation {
+<a href=#619 id=619 data-nosnippet>619</a>                    scope: escalated.clone(),
+<a href=#620 id=620 data-nosnippet>620</a>                });
+<a href=#621 id=621 data-nosnippet>621</a>            }
+<a href=#622 id=622 data-nosnippet>622</a>            <span class="comment">// Child must not outlive parent.
+<a href=#623 id=623 data-nosnippet>623</a>            </span><span class="kw">if </span>child.exp &gt; parent.exp {
+<a href=#624 id=624 data-nosnippet>624</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::ExpEscalation {
+<a href=#625 id=625 data-nosnippet>625</a>                    child: child.exp,
+<a href=#626 id=626 data-nosnippet>626</a>                    parent: parent.exp,
+<a href=#627 id=627 data-nosnippet>627</a>                });
+<a href=#628 id=628 data-nosnippet>628</a>            }
+<a href=#629 id=629 data-nosnippet>629</a>            <span class="comment">// Child must not be backdated before its parent. A
+<a href=#630 id=630 data-nosnippet>630</a>            // hostile HMAC-shared-secret holder could otherwise mint
+<a href=#631 id=631 data-nosnippet>631</a>            // a child with `iat` up to MAX_TTL_SECS BEFORE the parent
+<a href=#632 id=632 data-nosnippet>632</a>            // that "delegated" it — asserting authorization causality
+<a href=#633 id=633 data-nosnippet>633</a>            // that never happened. Consumers that treat `claims.iat`
+<a href=#634 id=634 data-nosnippet>634</a>            // as "when this identity became authorized" (audit
+<a href=#635 id=635 data-nosnippet>635</a>            // pipelines, revocation-cache pruning that keys eviction
+<a href=#636 id=636 data-nosnippet>636</a>            // horizons on `iat + MAX_TTL_SECS`) are then lied to.
+<a href=#637 id=637 data-nosnippet>637</a>            </span><span class="kw">if </span>child.iat &lt; parent.iat {
+<a href=#638 id=638 data-nosnippet>638</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::IatEscalation {
+<a href=#639 id=639 data-nosnippet>639</a>                    child: child.iat,
+<a href=#640 id=640 data-nosnippet>640</a>                    parent: parent.iat,
+<a href=#641 id=641 data-nosnippet>641</a>                });
+<a href=#642 id=642 data-nosnippet>642</a>            }
+<a href=#643 id=643 data-nosnippet>643</a>            <span class="comment">// Same posture for `nbf`: a child cannot become usable
+<a href=#644 id=644 data-nosnippet>644</a>            // before the parent that granted it did. Compare
+<a href=#645 id=645 data-nosnippet>645</a>            // EFFECTIVE start times uniformly — fall back to `iat`
+<a href=#646 id=646 data-nosnippet>646</a>            // on either side that omits `nbf`. An earlier version
+<a href=#647 id=647 data-nosnippet>647</a>            // of this block was guarded by
+<a href=#648 id=648 data-nosnippet>648</a>            // `if let Some(child_nbf) = child.nbf`, so a child that
+<a href=#649 id=649 data-nosnippet>649</a>            // OMITTED `nbf` sailed past the check even when its raw
+<a href=#650 id=650 data-nosnippet>650</a>            // `iat` predated the parent's explicit `nbf`: e.g.
+<a href=#651 id=651 data-nosnippet>651</a>            // `parent{iat=t0, nbf=t0+15}` +
+<a href=#652 id=652 data-nosnippet>652</a>            // `child{iat=t0+10, nbf=None}` was accepted, though the
+<a href=#653 id=653 data-nosnippet>653</a>            // child asserts authority 5 seconds before the parent
+<a href=#654 id=654 data-nosnippet>654</a>            // grant became active. The `IatEscalation` check above
+<a href=#655 id=655 data-nosnippet>655</a>            // fires only for `child.iat &lt; parent.iat` and does not
+<a href=#656 id=656 data-nosnippet>656</a>            // cover this gap. Consumers treating `claims.iat` (or
+<a href=#657 id=657 data-nosnippet>657</a>            // `nbf`) as "when this identity became authorized" saw
+<a href=#658 id=658 data-nosnippet>658</a>            // an inverted causal ordering.
+<a href=#659 id=659 data-nosnippet>659</a>            </span><span class="kw">let </span>parent_start = parent.nbf.unwrap_or(parent.iat);
+<a href=#660 id=660 data-nosnippet>660</a>            <span class="kw">let </span>child_start = child.nbf.unwrap_or(child.iat);
+<a href=#661 id=661 data-nosnippet>661</a>            <span class="kw">if </span>child_start &lt; parent_start {
+<a href=#662 id=662 data-nosnippet>662</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::NbfEscalation {
+<a href=#663 id=663 data-nosnippet>663</a>                    child: child_start,
+<a href=#664 id=664 data-nosnippet>664</a>                    parent: parent_start,
+<a href=#665 id=665 data-nosnippet>665</a>                });
+<a href=#666 id=666 data-nosnippet>666</a>            }
+<a href=#667 id=667 data-nosnippet>667</a>            parent_token = parent.parent_token.clone();
+<a href=#668 id=668 data-nosnippet>668</a>            child = parent;
+<a href=#669 id=669 data-nosnippet>669</a>        }
+<a href=#670 id=670 data-nosnippet>670</a>        <span class="comment">// For tokens with no parent_token chain, still check act depth alone.
+<a href=#671 id=671 data-nosnippet>671</a>        </span><span class="kw">if </span>depth == <span class="number">0 </span>&amp;&amp; act_depth &gt; <span class="self">self</span>.max_chain_depth {
+<a href=#672 id=672 data-nosnippet>672</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::ChainTooDeep(<span class="self">self</span>.max_chain_depth));
+<a href=#673 id=673 data-nosnippet>673</a>        }
+<a href=#674 id=674 data-nosnippet>674</a>        <span class="kw">let </span>total = depth + act_depth;
+<a href=#675 id=675 data-nosnippet>675</a>        <span class="kw">let </span>now_s = pv_core::time::now_ms() / pv_core::units::MS_PER_SEC;
+<a href=#676 id=676 data-nosnippet>676</a>        <span class="prelude-val">Ok</span>(ValidatedIdentity {
+<a href=#677 id=677 data-nosnippet>677</a>            ttl_remaining_s: leaf.exp.saturating_sub(now_s),
+<a href=#678 id=678 data-nosnippet>678</a>            chain_depth: depth,
+<a href=#679 id=679 data-nosnippet>679</a>            chain_tokens,
+<a href=#680 id=680 data-nosnippet>680</a>            total_delegation_depth: total,
+<a href=#681 id=681 data-nosnippet>681</a>            claims: leaf,
+<a href=#682 id=682 data-nosnippet>682</a>        })
+<a href=#683 id=683 data-nosnippet>683</a>    }
+<a href=#684 id=684 data-nosnippet>684</a>
+<a href=#685 id=685 data-nosnippet>685</a>    <span class="doccomment">/// Validate one JWT, in order: pre-auth 8 KiB size cap, header sanity,
+<a href=#686 id=686 data-nosnippet>686</a>    /// kid lookup, alg/key-type match, signature,
+<a href=#687 id=687 data-nosnippet>687</a>    /// exp/aud/sub/iss required (+ `nbf` when present), `exp &gt; iat`
+<a href=#688 id=688 data-nosnippet>688</a>    /// consistency, future-iat, TTL cap, field presence,
+<a href=#689 id=689 data-nosnippet>689</a>    /// bidi/zero-width spoofing guard, issuer allowlist (when configured).
+<a href=#690 id=690 data-nosnippet>690</a>    </span><span class="kw">fn </span>validate_single(<span class="kw-2">&amp;</span><span class="self">self</span>, token: <span class="kw-2">&amp;</span>str, for_revocation: bool) -&gt; <span class="prelude-ty">Result</span>&lt;NhiClaims, IdentityError&gt; {
+<a href=#691 id=691 data-nosnippet>691</a>        <span class="comment">// Reject oversized tokens up front so an unauthenticated caller
+<a href=#692 id=692 data-nosnippet>692</a>        // cannot amplify their pre-auth memory footprint through
+<a href=#693 id=693 data-nosnippet>693</a>        // `jsonwebtoken::decode_header`, which base64-decodes the
+<a href=#694 id=694 data-nosnippet>694</a>        // header segment before signature verification. RFC-realistic
+<a href=#695 id=695 data-nosnippet>695</a>        // NHI JWTs are at most a few KiB; 8 KiB is a comfortable
+<a href=#696 id=696 data-nosnippet>696</a>        // ceiling that blocks the amplification while accepting real
+<a href=#697 id=697 data-nosnippet>697</a>        // tokens with generous claim sets.
+<a href=#698 id=698 data-nosnippet>698</a>        </span><span class="kw">const </span>MAX_JWT_BYTES: usize = <span class="number">8 </span>* <span class="number">1024</span>;
+<a href=#699 id=699 data-nosnippet>699</a>        <span class="kw">if </span>token.len() &gt; MAX_JWT_BYTES {
+<a href=#700 id=700 data-nosnippet>700</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Malformed(<span class="macro">format!</span>(
+<a href=#701 id=701 data-nosnippet>701</a>                <span class="string">"token is {} bytes, exceeds pre-auth cap of {MAX_JWT_BYTES}"</span>,
+<a href=#702 id=702 data-nosnippet>702</a>                token.len()
+<a href=#703 id=703 data-nosnippet>703</a>            )));
+<a href=#704 id=704 data-nosnippet>704</a>        }
+<a href=#705 id=705 data-nosnippet>705</a>        <span class="kw">let </span>header =
+<a href=#706 id=706 data-nosnippet>706</a>            jsonwebtoken::decode_header(token).map_err(|e| IdentityError::Malformed(e.to_string()))<span class="question-mark">?</span>;
+<a href=#707 id=707 data-nosnippet>707</a>        validate_jose_header(<span class="kw-2">&amp;</span>header)<span class="question-mark">?</span>;
+<a href=#708 id=708 data-nosnippet>708</a>        <span class="comment">// Harness tool and intent credentials are separate profiles, even
+<a href=#709 id=709 data-nosnippet>709</a>        // if an operator also registers the harness key in the IdP key set.
+<a href=#710 id=710 data-nosnippet>710</a>        </span><span class="kw">if </span><span class="macro">matches!</span>(header.typ.as_deref(), <span class="prelude-val">Some</span>(<span class="string">"av-tool+jwt" </span>| <span class="string">"av-intent+jwt"</span>)) {
+<a href=#711 id=711 data-nosnippet>711</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Verification(
+<a href=#712 id=712 data-nosnippet>712</a>                <span class="string">"backend token profile is not an inbound identity"</span>.into(),
+<a href=#713 id=713 data-nosnippet>713</a>            ));
+<a href=#714 id=714 data-nosnippet>714</a>        }
+<a href=#715 id=715 data-nosnippet>715</a>        <span class="kw">let </span>kid = header.kid.ok_or(IdentityError::MissingKid)<span class="question-mark">?</span>;
+<a href=#716 id=716 data-nosnippet>716</a>        <span class="kw">let </span>keys = <span class="self">self</span>.keys.read();
+<a href=#717 id=717 data-nosnippet>717</a>        <span class="kw">let </span>key = keys
+<a href=#718 id=718 data-nosnippet>718</a>            .get(<span class="kw-2">&amp;</span>kid)
+<a href=#719 id=719 data-nosnippet>719</a>            .ok_or_else(|| IdentityError::UnknownKid(kid.clone()))<span class="question-mark">?</span>;
+<a href=#720 id=720 data-nosnippet>720</a>
+<a href=#721 id=721 data-nosnippet>721</a>        <span class="comment">// Algorithm-confusion defense: the key's type dictates the only
+<a href=#722 id=722 data-nosnippet>722</a>        // acceptable alg; the token's stated alg must equal it exactly.
+<a href=#723 id=723 data-nosnippet>723</a>        </span><span class="kw">let </span>(expected_alg, decoding_key) = <span class="kw">match </span>key {
+<a href=#724 id=724 data-nosnippet>724</a>            KeyMaterial::Ed25519Pem(pem) =&gt; (
+<a href=#725 id=725 data-nosnippet>725</a>                Algorithm::EdDSA,
+<a href=#726 id=726 data-nosnippet>726</a>                DecodingKey::from_ed_pem(pem.as_bytes())
+<a href=#727 id=727 data-nosnippet>727</a>                    .map_err(|e| IdentityError::Malformed(<span class="macro">format!</span>(<span class="string">"bad key for kid {kid}: {e}"</span>)))<span class="question-mark">?</span>,
+<a href=#728 id=728 data-nosnippet>728</a>            ),
+<a href=#729 id=729 data-nosnippet>729</a>            KeyMaterial::Ed25519Jwk(x) =&gt; (
+<a href=#730 id=730 data-nosnippet>730</a>                Algorithm::EdDSA,
+<a href=#731 id=731 data-nosnippet>731</a>                DecodingKey::from_ed_components(x)
+<a href=#732 id=732 data-nosnippet>732</a>                    .map_err(|e| IdentityError::Malformed(<span class="macro">format!</span>(<span class="string">"bad JWK for kid {kid}: {e}"</span>)))<span class="question-mark">?</span>,
+<a href=#733 id=733 data-nosnippet>733</a>            ),
+<a href=#734 id=734 data-nosnippet>734</a>            KeyMaterial::HmacSecret(secret) =&gt; (Algorithm::HS256, DecodingKey::from_secret(secret)),
+<a href=#735 id=735 data-nosnippet>735</a>        };
+<a href=#736 id=736 data-nosnippet>736</a>        <span class="kw">if </span>header.alg != expected_alg {
+<a href=#737 id=737 data-nosnippet>737</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::AlgorithmRejected {
+<a href=#738 id=738 data-nosnippet>738</a>                alg: <span class="macro">format!</span>(<span class="string">"{:?}"</span>, header.alg),
+<a href=#739 id=739 data-nosnippet>739</a>                kid,
+<a href=#740 id=740 data-nosnippet>740</a>            });
+<a href=#741 id=741 data-nosnippet>741</a>        }
+<a href=#742 id=742 data-nosnippet>742</a>
+<a href=#743 id=743 data-nosnippet>743</a>        <span class="kw">let </span><span class="kw-2">mut </span>validation = Validation::new(expected_alg);
+<a href=#744 id=744 data-nosnippet>744</a>        validation.set_audience(std::slice::from_ref(<span class="kw-2">&amp;</span><span class="self">self</span>.audience));
+<a href=#745 id=745 data-nosnippet>745</a>        validation.set_required_spec_claims(<span class="kw-2">&amp;</span>[<span class="string">"exp"</span>, <span class="string">"aud"</span>, <span class="string">"sub"</span>, <span class="string">"iss"</span>]);
+<a href=#746 id=746 data-nosnippet>746</a>        validation.leeway = <span class="self">self</span>.leeway_secs;
+<a href=#747 id=747 data-nosnippet>747</a>        validation.validate_nbf = !for_revocation;
+<a href=#748 id=748 data-nosnippet>748</a>
+<a href=#749 id=749 data-nosnippet>749</a>        <span class="kw">let </span>data = jsonwebtoken::decode::&lt;NhiClaims&gt;(token, <span class="kw-2">&amp;</span>decoding_key, <span class="kw-2">&amp;</span>validation).map_err(|e| {
+<a href=#750 id=750 data-nosnippet>750</a>            <span class="comment">// Round-107: on expiry, re-decode with the SAME key and
+<a href=#751 id=751 data-nosnippet>751</a>            // audience but exp validation off — signature integrity
+<a href=#752 id=752 data-nosnippet>752</a>            // still enforced — purely to recover exp for the error.
+<a href=#753 id=753 data-nosnippet>753</a>            // The token is still rejected either way; this only
+<a href=#754 id=754 data-nosnippet>754</a>            // upgrades diagnosability (skewed-host vs stale-token).
+<a href=#755 id=755 data-nosnippet>755</a>            </span><span class="kw">if </span><span class="macro">matches!</span>(e.kind(), jsonwebtoken::errors::ErrorKind::ExpiredSignature) {
+<a href=#756 id=756 data-nosnippet>756</a>                <span class="kw">let </span><span class="kw-2">mut </span>relaxed = validation.clone();
+<a href=#757 id=757 data-nosnippet>757</a>                relaxed.validate_exp = <span class="bool-val">false</span>;
+<a href=#758 id=758 data-nosnippet>758</a>                <span class="kw">if let </span><span class="prelude-val">Ok</span>(peek) = jsonwebtoken::decode::&lt;NhiClaims&gt;(token, <span class="kw-2">&amp;</span>decoding_key, <span class="kw-2">&amp;</span>relaxed) {
+<a href=#759 id=759 data-nosnippet>759</a>                    <span class="kw">let </span>now_s = pv_core::time::now_ms() / pv_core::units::MS_PER_SEC;
+<a href=#760 id=760 data-nosnippet>760</a>                    <span class="kw">return </span>IdentityError::Expired {
+<a href=#761 id=761 data-nosnippet>761</a>                        exp: peek.claims.exp,
+<a href=#762 id=762 data-nosnippet>762</a>                        now: now_s,
+<a href=#763 id=763 data-nosnippet>763</a>                    };
+<a href=#764 id=764 data-nosnippet>764</a>                }
+<a href=#765 id=765 data-nosnippet>765</a>            }
+<a href=#766 id=766 data-nosnippet>766</a>            IdentityError::Verification(e.to_string())
+<a href=#767 id=767 data-nosnippet>767</a>        })<span class="question-mark">?</span>;
+<a href=#768 id=768 data-nosnippet>768</a>        <span class="kw">let </span>claims = data.claims;
+<a href=#769 id=769 data-nosnippet>769</a>
+<a href=#770 id=770 data-nosnippet>770</a>        <span class="kw">let </span>now_s = pv_core::time::now_ms() / pv_core::units::MS_PER_SEC;
+<a href=#771 id=771 data-nosnippet>771</a>        validate_claim_fields(<span class="kw-2">&amp;</span>claims, now_s, <span class="self">self</span>.leeway_secs, for_revocation)<span class="question-mark">?</span>;
+<a href=#772 id=772 data-nosnippet>772</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(allowed) = <span class="kw-2">&amp;</span><span class="self">self</span>.allowed_issuers {
+<a href=#773 id=773 data-nosnippet>773</a>            <span class="kw">if </span>!allowed.contains(<span class="kw-2">&amp;</span>claims.iss) {
+<a href=#774 id=774 data-nosnippet>774</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::BadIssuer(claims.iss));
+<a href=#775 id=775 data-nosnippet>775</a>            }
+<a href=#776 id=776 data-nosnippet>776</a>        }
+<a href=#777 id=777 data-nosnippet>777</a>        <span class="prelude-val">Ok</span>(claims)
+<a href=#778 id=778 data-nosnippet>778</a>    }
+<a href=#779 id=779 data-nosnippet>779</a>}
+<a href=#780 id=780 data-nosnippet>780</a>
+<a href=#781 id=781 data-nosnippet>781</a><span class="doccomment">/// Neither credential profile implements JOSE extensions or unencoded payloads.
+<a href=#782 id=782 data-nosnippet>782</a>/// jsonwebtoken parses these headers but does not enforce their semantics.
+<a href=#783 id=783 data-nosnippet>783</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>validate_jose_header(header: <span class="kw-2">&amp;</span>jsonwebtoken::Header) -&gt; <span class="prelude-ty">Result</span>&lt;(), IdentityError&gt; {
+<a href=#784 id=784 data-nosnippet>784</a>    <span class="kw">if </span>header.crit.is_some() || !<span class="macro">matches!</span>(header.extras.get::&lt;bool&gt;(<span class="string">"b64"</span>), <span class="prelude-val">Ok</span>(<span class="prelude-val">None </span>| <span class="prelude-val">Some</span>(<span class="bool-val">true</span>))) {
+<a href=#785 id=785 data-nosnippet>785</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Verification(
+<a href=#786 id=786 data-nosnippet>786</a>            <span class="string">"unsupported critical JWT header or unencoded payload"</span>.into(),
+<a href=#787 id=787 data-nosnippet>787</a>        ));
+<a href=#788 id=788 data-nosnippet>788</a>    }
+<a href=#789 id=789 data-nosnippet>789</a>    <span class="prelude-val">Ok</span>(())
+<a href=#790 id=790 data-nosnippet>790</a>}
+<a href=#791 id=791 data-nosnippet>791</a>
+<a href=#792 id=792 data-nosnippet>792</a><span class="doccomment">/// Structural checks shared by inbound and harness-issued tokens after signature verification.
+<a href=#793 id=793 data-nosnippet>793</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>validate_claim_fields(
+<a href=#794 id=794 data-nosnippet>794</a>    claims: <span class="kw-2">&amp;</span>NhiClaims,
+<a href=#795 id=795 data-nosnippet>795</a>    now_s: u64,
+<a href=#796 id=796 data-nosnippet>796</a>    leeway_secs: u64,
+<a href=#797 id=797 data-nosnippet>797</a>    for_revocation: bool,
+<a href=#798 id=798 data-nosnippet>798</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), IdentityError&gt; {
+<a href=#799 id=799 data-nosnippet>799</a>    <span class="kw">if </span>claims.exp &lt;= claims.iat {
+<a href=#800 id=800 data-nosnippet>800</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::BadTimestamps {
+<a href=#801 id=801 data-nosnippet>801</a>            iat: claims.iat,
+<a href=#802 id=802 data-nosnippet>802</a>            exp: claims.exp,
+<a href=#803 id=803 data-nosnippet>803</a>        });
+<a href=#804 id=804 data-nosnippet>804</a>    }
+<a href=#805 id=805 data-nosnippet>805</a>    <span class="kw">let </span>future_bound = now_s
+<a href=#806 id=806 data-nosnippet>806</a>        .saturating_add(leeway_secs)
+<a href=#807 id=807 data-nosnippet>807</a>        .saturating_add(<span class="kw">if </span>for_revocation { MAX_TTL_SECS } <span class="kw">else </span>{ <span class="number">0 </span>});
+<a href=#808 id=808 data-nosnippet>808</a>    <span class="kw">if </span>claims.iat &gt; future_bound || (for_revocation &amp;&amp; claims.nbf.is_some_and(|nbf| nbf &gt; future_bound)) {
+<a href=#809 id=809 data-nosnippet>809</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::FutureIat {
+<a href=#810 id=810 data-nosnippet>810</a>            iat: claims.iat,
+<a href=#811 id=811 data-nosnippet>811</a>            now: now_s,
+<a href=#812 id=812 data-nosnippet>812</a>        });
+<a href=#813 id=813 data-nosnippet>813</a>    }
+<a href=#814 id=814 data-nosnippet>814</a>    <span class="kw">let </span>ttl = claims.exp - claims.iat;
+<a href=#815 id=815 data-nosnippet>815</a>    <span class="kw">if </span>ttl &gt; MAX_TTL_SECS {
+<a href=#816 id=816 data-nosnippet>816</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::TtlTooLong(ttl));
+<a href=#817 id=817 data-nosnippet>817</a>    }
+<a href=#818 id=818 data-nosnippet>818</a>    <span class="kw">if </span>claims.iss.is_empty() {
+<a href=#819 id=819 data-nosnippet>819</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::EmptyField(<span class="string">"iss"</span>));
+<a href=#820 id=820 data-nosnippet>820</a>    }
+<a href=#821 id=821 data-nosnippet>821</a>    <span class="kw">if </span>claims.sub.is_empty() {
+<a href=#822 id=822 data-nosnippet>822</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::EmptyField(<span class="string">"sub"</span>));
+<a href=#823 id=823 data-nosnippet>823</a>    }
+<a href=#824 id=824 data-nosnippet>824</a>    <span class="kw">if </span>claims.jti.is_empty() {
+<a href=#825 id=825 data-nosnippet>825</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::EmptyField(<span class="string">"jti"</span>));
+<a href=#826 id=826 data-nosnippet>826</a>    }
+<a href=#827 id=827 data-nosnippet>827</a>    <span class="kw">if </span>claims.instance_uid.is_empty() {
+<a href=#828 id=828 data-nosnippet>828</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::EmptyField(<span class="string">"instance_uid"</span>));
+<a href=#829 id=829 data-nosnippet>829</a>    }
+<a href=#830 id=830 data-nosnippet>830</a>    <span class="comment">// Administrative revocation accepts these exact identifier constraints.
+<a href=#831 id=831 data-nosnippet>831</a>    // Admitting a control-bearing identifier here would create credentials
+<a href=#832 id=832 data-nosnippet>832</a>    // that the operator endpoint cannot name when responding to an incident.
+<a href=#833 id=833 data-nosnippet>833</a>    </span><span class="kw">for </span>(field, value) <span class="kw">in </span>[
+<a href=#834 id=834 data-nosnippet>834</a>        (<span class="string">"jti"</span>, claims.jti.as_str()),
+<a href=#835 id=835 data-nosnippet>835</a>        (<span class="string">"instance_uid"</span>, claims.instance_uid.as_str()),
+<a href=#836 id=836 data-nosnippet>836</a>    ] {
+<a href=#837 id=837 data-nosnippet>837</a>        <span class="kw">if </span>value.trim().is_empty() {
+<a href=#838 id=838 data-nosnippet>838</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::EmptyField(field));
+<a href=#839 id=839 data-nosnippet>839</a>        }
+<a href=#840 id=840 data-nosnippet>840</a>        <span class="kw">if </span>value.chars().any(char::is_control) {
+<a href=#841 id=841 data-nosnippet>841</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Malformed(<span class="macro">format!</span>(
+<a href=#842 id=842 data-nosnippet>842</a>                <span class="string">"identity field {field} contains a control character"
+<a href=#843 id=843 data-nosnippet>843</a>            </span>)));
+<a href=#844 id=844 data-nosnippet>844</a>        }
+<a href=#845 id=845 data-nosnippet>845</a>    }
+<a href=#846 id=846 data-nosnippet>846</a>    <span class="kw">if </span>claims.charter.is_empty() {
+<a href=#847 id=847 data-nosnippet>847</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::EmptyField(<span class="string">"charter"</span>));
+<a href=#848 id=848 data-nosnippet>848</a>    }
+<a href=#849 id=849 data-nosnippet>849</a>    <span class="kw">if </span>claims.version.is_empty() {
+<a href=#850 id=850 data-nosnippet>850</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::EmptyField(<span class="string">"version"</span>));
+<a href=#851 id=851 data-nosnippet>851</a>    }
+<a href=#852 id=852 data-nosnippet>852</a>    <span class="comment">// docs/reference/LIMITS.md documents a 256-code-point charter cap
+<a href=#853 id=853 data-nosnippet>853</a>    // ("longer are refused with 400"); the same reasoning applies to
+<a href=#854 id=854 data-nosnippet>854</a>    // EVERY identity string that flows into logs, receipts, and
+<a href=#855 id=855 data-nosnippet>855</a>    // event chains — an unbounded (up to the ~7 KiB per-claim JWT
+<a href=#856 id=856 data-nosnippet>856</a>    // budget) attacker-chosen field is log-spam surface and — since
+<a href=#857 id=857 data-nosnippet>857</a>    // instance_uid/version bind into every SIGNED receipt — bloats
+<a href=#858 id=858 data-nosnippet>858</a>    // the JCS-canonicalized signing input on every request. Cap all
+<a href=#859 id=859 data-nosnippet>859</a>    // identity strings at the same limit for one consistent rule.
+<a href=#860 id=860 data-nosnippet>860</a>    // Threat model: an HMAC-shared-secret deployment where multiple
+<a href=#861 id=861 data-nosnippet>861</a>    // principals hold the identity signing key. Any of them can
+<a href=#862 id=862 data-nosnippet>862</a>    // construct a valid JWT with hostile-length claims.
+<a href=#863 id=863 data-nosnippet>863</a>    // instance_uid has a TIGHTER cap than the other identity
+<a href=#864 id=864 data-nosnippet>864</a>    // strings: it flows verbatim into `ai_agent.instance_uid` on
+<a href=#865 id=865 data-nosnippet>865</a>    // every OCSF event and signed receipt, and the shipped schemas
+<a href=#866 id=866 data-nosnippet>866</a>    // (ocsf-agent-event, receipt-v2) pin it at maxLength 128 —
+<a href=#867 id=867 data-nosnippet>867</a>    // matching `pv_core::InstanceUid::parse`. A 129–256-char uid
+<a href=#868 id=868 data-nosnippet>868</a>    // admitted here would build events/receipts that Rust-side
+<a href=#869 id=869 data-nosnippet>869</a>    // validation accepts but every external schema verifier (and
+<a href=#870 id=870 data-nosnippet>870</a>    // the console ingest) refuses — the split-verdict class.
+<a href=#871 id=871 data-nosnippet>871</a>    </span><span class="kw">const </span>MAX_INSTANCE_UID_CHARS: usize = <span class="number">128</span>;
+<a href=#872 id=872 data-nosnippet>872</a>    <span class="kw">if </span>claims.instance_uid.chars().count() &gt; MAX_INSTANCE_UID_CHARS {
+<a href=#873 id=873 data-nosnippet>873</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::FieldTooLong {
+<a href=#874 id=874 data-nosnippet>874</a>            field: <span class="string">"instance_uid"</span>,
+<a href=#875 id=875 data-nosnippet>875</a>            max: MAX_INSTANCE_UID_CHARS,
+<a href=#876 id=876 data-nosnippet>876</a>        });
+<a href=#877 id=877 data-nosnippet>877</a>    }
+<a href=#878 id=878 data-nosnippet>878</a>    <span class="comment">// azp: if present, must be non-empty and within length limits.
+<a href=#879 id=879 data-nosnippet>879</a>    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(azp) = <span class="kw-2">&amp;</span>claims.azp {
+<a href=#880 id=880 data-nosnippet>880</a>        <span class="kw">if </span>azp.is_empty() {
+<a href=#881 id=881 data-nosnippet>881</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::EmptyField(<span class="string">"azp"</span>));
+<a href=#882 id=882 data-nosnippet>882</a>        }
+<a href=#883 id=883 data-nosnippet>883</a>    }
+<a href=#884 id=884 data-nosnippet>884</a>    <span class="comment">// act: if present, each nested actor sub must be non-empty.
+<a href=#885 id=885 data-nosnippet>885</a>    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(act) = <span class="kw-2">&amp;</span>claims.act {
+<a href=#886 id=886 data-nosnippet>886</a>        validate_actor_chain(act)<span class="question-mark">?</span>;
+<a href=#887 id=887 data-nosnippet>887</a>    }
+<a href=#888 id=888 data-nosnippet>888</a>    <span class="kw">let </span><span class="kw-2">mut </span>identity_fields: Vec&lt;(<span class="kw-2">&amp;</span>str, <span class="kw-2">&amp;</span>str)&gt; = <span class="macro">vec!</span>[
+<a href=#889 id=889 data-nosnippet>889</a>        (<span class="string">"instance_uid"</span>, claims.instance_uid.as_str()),
+<a href=#890 id=890 data-nosnippet>890</a>        (<span class="string">"charter"</span>, claims.charter.as_str()),
+<a href=#891 id=891 data-nosnippet>891</a>        (<span class="string">"version"</span>, claims.version.as_str()),
+<a href=#892 id=892 data-nosnippet>892</a>        (<span class="string">"sub"</span>, claims.sub.as_str()),
+<a href=#893 id=893 data-nosnippet>893</a>        (<span class="string">"iss"</span>, claims.iss.as_str()),
+<a href=#894 id=894 data-nosnippet>894</a>        (<span class="string">"jti"</span>, claims.jti.as_str()),
+<a href=#895 id=895 data-nosnippet>895</a>    ];
+<a href=#896 id=896 data-nosnippet>896</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(azp) = <span class="kw-2">&amp;</span>claims.azp {
+<a href=#897 id=897 data-nosnippet>897</a>        identity_fields.push((<span class="string">"azp"</span>, azp.as_str()));
+<a href=#898 id=898 data-nosnippet>898</a>    }
+<a href=#899 id=899 data-nosnippet>899</a>    <span class="kw">for </span>(name, value) <span class="kw">in </span><span class="kw-2">&amp;</span>identity_fields {
+<a href=#900 id=900 data-nosnippet>900</a>        <span class="kw">if </span>value.chars().count() &gt; MAX_IDENTITY_STRING_CHARS {
+<a href=#901 id=901 data-nosnippet>901</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::FieldTooLong {
+<a href=#902 id=902 data-nosnippet>902</a>                field: name,
+<a href=#903 id=903 data-nosnippet>903</a>                max: MAX_IDENTITY_STRING_CHARS,
+<a href=#904 id=904 data-nosnippet>904</a>            });
+<a href=#905 id=905 data-nosnippet>905</a>        }
+<a href=#906 id=906 data-nosnippet>906</a>    }
+<a href=#907 id=907 data-nosnippet>907</a>    <span class="comment">// Bound the scopes array too: an unbounded list (or an
+<a href=#908 id=908 data-nosnippet>908</a>    // individually oversized scope) is the same log-spam / receipt-
+<a href=#909 id=909 data-nosnippet>909</a>    // bloat vector as the strings above, and the delegation-chain
+<a href=#910 id=910 data-nosnippet>910</a>    // subset check runs a per-element comparison so a 10000-entry
+<a href=#911 id=911 data-nosnippet>911</a>    // scopes[] amplifies delegation-verification cost per request.
+<a href=#912 id=912 data-nosnippet>912</a>    </span><span class="kw">if </span>claims.scopes.len() &gt; MAX_SCOPES {
+<a href=#913 id=913 data-nosnippet>913</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::FieldTooLong {
+<a href=#914 id=914 data-nosnippet>914</a>            field: <span class="string">"scopes"</span>,
+<a href=#915 id=915 data-nosnippet>915</a>            max: MAX_SCOPES,
+<a href=#916 id=916 data-nosnippet>916</a>        });
+<a href=#917 id=917 data-nosnippet>917</a>    }
+<a href=#918 id=918 data-nosnippet>918</a>    <span class="kw">for </span>scope <span class="kw">in </span><span class="kw-2">&amp;</span>claims.scopes {
+<a href=#919 id=919 data-nosnippet>919</a>        <span class="comment">// Scopes are emitted as a space-delimited OAuth scope string during
+<a href=#920 id=920 data-nosnippet>920</a>        // exchange and introspection. One array entry must never become two
+<a href=#921 id=921 data-nosnippet>921</a>        // permissions when a backend parses that representation.
+<a href=#922 id=922 data-nosnippet>922</a>        </span><span class="kw">if </span>scope.is_empty() || scope.chars().any(|c| c.is_whitespace() || c.is_control()) {
+<a href=#923 id=923 data-nosnippet>923</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::Malformed(
+<a href=#924 id=924 data-nosnippet>924</a>                <span class="string">"scope entries must be non-empty without whitespace or controls"</span>.into(),
+<a href=#925 id=925 data-nosnippet>925</a>            ));
+<a href=#926 id=926 data-nosnippet>926</a>        }
+<a href=#927 id=927 data-nosnippet>927</a>        <span class="kw">if </span>scope.chars().count() &gt; MAX_IDENTITY_STRING_CHARS {
+<a href=#928 id=928 data-nosnippet>928</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::FieldTooLong {
+<a href=#929 id=929 data-nosnippet>929</a>                field: <span class="string">"scopes[]"</span>,
+<a href=#930 id=930 data-nosnippet>930</a>                max: MAX_IDENTITY_STRING_CHARS,
+<a href=#931 id=931 data-nosnippet>931</a>            });
+<a href=#932 id=932 data-nosnippet>932</a>        }
+<a href=#933 id=933 data-nosnippet>933</a>    }
+<a href=#934 id=934 data-nosnippet>934</a>    <span class="comment">// Trojan-Source guard: any bidi override or zero-width character in
+<a href=#935 id=935 data-nosnippet>935</a>    // a rendered identity field would spoof how it looks in operator
+<a href=#936 id=936 data-nosnippet>936</a>    // logs, receipts, and event chains while remaining part of the raw
+<a href=#937 id=937 data-nosnippet>937</a>    // bytes on the wire. Scopes must be guarded too — they are the
+<a href=#938 id=938 data-nosnippet>938</a>    // most audit-prominent identity strings and were the only one
+<a href=#939 id=939 data-nosnippet>939</a>    // omitted from the original list, an inconsistency that let a
+<a href=#940 id=940 data-nosnippet>940</a>    // scope like `payout\u{202E}elbast` render as visually-corrupt
+<a href=#941 id=941 data-nosnippet>941</a>    // junk in operator logs while still surviving the length cap and
+<a href=#942 id=942 data-nosnippet>942</a>    // the scope-subset check on raw bytes.
+<a href=#943 id=943 data-nosnippet>943</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>bidi_fields: Vec&lt;(<span class="kw-2">&amp;</span>str, <span class="kw-2">&amp;</span>str)&gt; = <span class="macro">vec!</span>[
+<a href=#944 id=944 data-nosnippet>944</a>        (<span class="string">"instance_uid"</span>, claims.instance_uid.as_str()),
+<a href=#945 id=945 data-nosnippet>945</a>        (<span class="string">"charter"</span>, claims.charter.as_str()),
+<a href=#946 id=946 data-nosnippet>946</a>        (<span class="string">"version"</span>, claims.version.as_str()),
+<a href=#947 id=947 data-nosnippet>947</a>        (<span class="string">"sub"</span>, claims.sub.as_str()),
+<a href=#948 id=948 data-nosnippet>948</a>        (<span class="string">"iss"</span>, claims.iss.as_str()),
+<a href=#949 id=949 data-nosnippet>949</a>        (<span class="string">"jti"</span>, claims.jti.as_str()),
+<a href=#950 id=950 data-nosnippet>950</a>    ];
+<a href=#951 id=951 data-nosnippet>951</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(azp) = <span class="kw-2">&amp;</span>claims.azp {
+<a href=#952 id=952 data-nosnippet>952</a>        bidi_fields.push((<span class="string">"azp"</span>, azp.as_str()));
+<a href=#953 id=953 data-nosnippet>953</a>    }
+<a href=#954 id=954 data-nosnippet>954</a>    <span class="kw">for </span>(name, value) <span class="kw">in </span><span class="kw-2">&amp;</span>bidi_fields {
+<a href=#955 id=955 data-nosnippet>955</a>        <span class="kw">if </span>pv_core::text::contains_bidi_or_zero_width(value) {
+<a href=#956 id=956 data-nosnippet>956</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::SpoofingCharacter(name));
+<a href=#957 id=957 data-nosnippet>957</a>        }
+<a href=#958 id=958 data-nosnippet>958</a>    }
+<a href=#959 id=959 data-nosnippet>959</a>    <span class="kw">for </span>scope <span class="kw">in </span><span class="kw-2">&amp;</span>claims.scopes {
+<a href=#960 id=960 data-nosnippet>960</a>        <span class="kw">if </span>pv_core::text::contains_bidi_or_zero_width(scope) {
+<a href=#961 id=961 data-nosnippet>961</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::SpoofingCharacter(<span class="string">"scopes[]"</span>));
+<a href=#962 id=962 data-nosnippet>962</a>        }
+<a href=#963 id=963 data-nosnippet>963</a>    }
+<a href=#964 id=964 data-nosnippet>964</a>    <span class="prelude-val">Ok</span>(())
+<a href=#965 id=965 data-nosnippet>965</a>}
+<a href=#966 id=966 data-nosnippet>966</a>
+<a href=#967 id=967 data-nosnippet>967</a><span class="doccomment">/// Validate every node in an actor claim chain: each `sub` must be non-empty
+<a href=#968 id=968 data-nosnippet>968</a>/// and free of bidi/zero-width spoofing characters.
+<a href=#969 id=969 data-nosnippet>969</a></span><span class="kw">fn </span>validate_actor_chain(actor: <span class="kw-2">&amp;</span><span class="kw">crate</span>::claims::ActorClaim) -&gt; <span class="prelude-ty">Result</span>&lt;(), IdentityError&gt; {
+<a href=#970 id=970 data-nosnippet>970</a>    <span class="kw">if </span>actor.sub.is_empty() {
+<a href=#971 id=971 data-nosnippet>971</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::EmptyField(<span class="string">"act.sub"</span>));
+<a href=#972 id=972 data-nosnippet>972</a>    }
+<a href=#973 id=973 data-nosnippet>973</a>    <span class="kw">if </span>pv_core::text::contains_bidi_or_zero_width(<span class="kw-2">&amp;</span>actor.sub) {
+<a href=#974 id=974 data-nosnippet>974</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::SpoofingCharacter(<span class="string">"act.sub"</span>));
+<a href=#975 id=975 data-nosnippet>975</a>    }
+<a href=#976 id=976 data-nosnippet>976</a>    <span class="kw">const </span>MAX_IDENTITY_STRING_CHARS: usize = <span class="number">256</span>;
+<a href=#977 id=977 data-nosnippet>977</a>    <span class="kw">if </span>actor.sub.chars().count() &gt; MAX_IDENTITY_STRING_CHARS {
+<a href=#978 id=978 data-nosnippet>978</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IdentityError::FieldTooLong {
+<a href=#979 id=979 data-nosnippet>979</a>            field: <span class="string">"act.sub"</span>,
+<a href=#980 id=980 data-nosnippet>980</a>            max: MAX_IDENTITY_STRING_CHARS,
+<a href=#981 id=981 data-nosnippet>981</a>        });
+<a href=#982 id=982 data-nosnippet>982</a>    }
+<a href=#983 id=983 data-nosnippet>983</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(inner) = <span class="kw-2">&amp;</span>actor.act {
+<a href=#984 id=984 data-nosnippet>984</a>        validate_actor_chain(inner)<span class="question-mark">?</span>;
+<a href=#985 id=985 data-nosnippet>985</a>    }
+<a href=#986 id=986 data-nosnippet>986</a>    <span class="prelude-val">Ok</span>(())
+<a href=#987 id=987 data-nosnippet>987</a>}
+<a href=#988 id=988 data-nosnippet>988</a>
+<a href=#989 id=989 data-nosnippet>989</a><span class="doccomment">/// Return true if `scope` is authorized by any of the `parent_scopes`,
+<a href=#990 id=990 data-nosnippet>990</a>/// using the SAME wildcard semantics
+<a href=#991 id=991 data-nosnippet>991</a>/// (`pv-harness::pipeline::scope_allows`) applied at runtime
+<a href=#992 id=992 data-nosnippet>992</a>/// authorization. Duplicating (rather than re-exporting) the check
+<a href=#993 id=993 data-nosnippet>993</a>/// keeps `pv-identity` free of an `pv-harness` dependency; if these
+<a href=#994 id=994 data-nosnippet>994</a>/// two ever diverge, the delegation gate becomes strictly stricter or
+<a href=#995 id=995 data-nosnippet>995</a>/// looser than the runtime gate — exact-string matching here once
+<a href=#996 id=996 data-nosnippet>996</a>/// rejected legitimately-delegated narrower scopes under a wildcard
+<a href=#997 id=997 data-nosnippet>997</a>/// parent, which is the class of bug such divergence produces.
+<a href=#998 id=998 data-nosnippet>998</a></span><span class="kw">fn </span>scope_covered_by(scope: <span class="kw-2">&amp;</span>str, parent_scopes: <span class="kw-2">&amp;</span>[String]) -&gt; bool {
+<a href=#999 id=999 data-nosnippet>999</a>    parent_scopes.iter().any(|parent| {
+<a href=#1000 id=1000 data-nosnippet>1000</a>        parent == <span class="string">"*"
+<a href=#1001 id=1001 data-nosnippet>1001</a>            </span>|| parent == scope
+<a href=#1002 id=1002 data-nosnippet>1002</a>            || parent
+<a href=#1003 id=1003 data-nosnippet>1003</a>                .strip_suffix(<span class="string">":*"</span>)
+<a href=#1004 id=1004 data-nosnippet>1004</a>                .is_some_and(|prefix| scope.starts_with(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"{prefix}:"</span>)))
+<a href=#1005 id=1005 data-nosnippet>1005</a>    })
+<a href=#1006 id=1006 data-nosnippet>1006</a>}
+<a href=#1007 id=1007 data-nosnippet>1007</a>
+<a href=#1008 id=1008 data-nosnippet>1008</a><span class="attr">#[cfg(test)]
+<a href=#1009 id=1009 data-nosnippet>1009</a></span><span class="kw">mod </span>key_material_tests {
+<a href=#1010 id=1010 data-nosnippet>1010</a>    <span class="attr">#![allow(clippy::unwrap_used)]
+<a href=#1011 id=1011 data-nosnippet>1011</a>
+<a href=#1012 id=1012 data-nosnippet>1012</a>    </span><span class="kw">use </span><span class="kw">super</span>::KeyMaterial;
+<a href=#1013 id=1013 data-nosnippet>1013</a>
+<a href=#1014 id=1014 data-nosnippet>1014</a>    <span class="doccomment">/// Round-19 mutation finding: the hand-written Debug impl exists
+<a href=#1015 id=1015 data-nosnippet>1015</a>    /// solely so key material can never leak into logs/error chains
+<a href=#1016 id=1016 data-nosnippet>1016</a>    /// ("never print secrets"), but nothing pinned it — replacing the
+<a href=#1017 id=1017 data-nosnippet>1017</a>    /// whole impl with a no-op survived the suite, and so would a
+<a href=#1018 id=1018 data-nosnippet>1018</a>    /// future `#[derive(Debug)]` refactor that prints the secret bytes
+<a href=#1019 id=1019 data-nosnippet>1019</a>    /// verbatim into any `{:?}` log site. Pin the redaction contract.
+<a href=#1020 id=1020 data-nosnippet>1020</a>    </span><span class="attr">#[test]
+<a href=#1021 id=1021 data-nosnippet>1021</a>    </span><span class="kw">fn </span>debug_never_prints_key_material() {
+<a href=#1022 id=1022 data-nosnippet>1022</a>        <span class="kw">const </span>SECRET_PEM: <span class="kw-2">&amp;</span>str = <span class="string">"-----BEGIN PUBLIC KEY-----abc123secretbytes"</span>;
+<a href=#1023 id=1023 data-nosnippet>1023</a>        <span class="kw">const </span>SECRET_HMAC: <span class="kw-2">&amp;</span>[u8] = <span class="string">b"hmac-shared-secret-0123456789abcdef"</span>;
+<a href=#1024 id=1024 data-nosnippet>1024</a>        <span class="kw">let </span>cases = [
+<a href=#1025 id=1025 data-nosnippet>1025</a>            (
+<a href=#1026 id=1026 data-nosnippet>1026</a>                <span class="macro">format!</span>(<span class="string">"{:?}"</span>, KeyMaterial::Ed25519Pem(SECRET_PEM.to_owned())),
+<a href=#1027 id=1027 data-nosnippet>1027</a>                <span class="string">"Ed25519Pem"</span>,
+<a href=#1028 id=1028 data-nosnippet>1028</a>            ),
+<a href=#1029 id=1029 data-nosnippet>1029</a>            (
+<a href=#1030 id=1030 data-nosnippet>1030</a>                <span class="macro">format!</span>(<span class="string">"{:?}"</span>, KeyMaterial::Ed25519Jwk(SECRET_PEM.to_owned())),
+<a href=#1031 id=1031 data-nosnippet>1031</a>                <span class="string">"Ed25519Jwk"</span>,
+<a href=#1032 id=1032 data-nosnippet>1032</a>            ),
+<a href=#1033 id=1033 data-nosnippet>1033</a>            (
+<a href=#1034 id=1034 data-nosnippet>1034</a>                <span class="macro">format!</span>(<span class="string">"{:?}"</span>, KeyMaterial::HmacSecret(SECRET_HMAC.to_vec())),
+<a href=#1035 id=1035 data-nosnippet>1035</a>                <span class="string">"HmacSecret"</span>,
+<a href=#1036 id=1036 data-nosnippet>1036</a>            ),
+<a href=#1037 id=1037 data-nosnippet>1037</a>        ];
+<a href=#1038 id=1038 data-nosnippet>1038</a>        <span class="kw">for </span>(rendered, variant) <span class="kw">in </span>cases {
+<a href=#1039 id=1039 data-nosnippet>1039</a>            <span class="macro">assert!</span>(
+<a href=#1040 id=1040 data-nosnippet>1040</a>                rendered.contains(variant),
+<a href=#1041 id=1041 data-nosnippet>1041</a>                <span class="string">"Debug must still name the variant for diagnosability: {rendered}"
+<a href=#1042 id=1042 data-nosnippet>1042</a>            </span>);
+<a href=#1043 id=1043 data-nosnippet>1043</a>            <span class="macro">assert!</span>(
+<a href=#1044 id=1044 data-nosnippet>1044</a>                !rendered.contains(<span class="string">"secret"</span>)
+<a href=#1045 id=1045 data-nosnippet>1045</a>                    &amp;&amp; !rendered.contains(<span class="string">"abc123"</span>)
+<a href=#1046 id=1046 data-nosnippet>1046</a>                    &amp;&amp; !rendered.contains(<span class="string">"0123456789"</span>),
+<a href=#1047 id=1047 data-nosnippet>1047</a>                <span class="string">"Debug leaked key material: {rendered}"
+<a href=#1048 id=1048 data-nosnippet>1048</a>            </span>);
+<a href=#1049 id=1049 data-nosnippet>1049</a>        }
+<a href=#1050 id=1050 data-nosnippet>1050</a>    }
+<a href=#1051 id=1051 data-nosnippet>1051</a>}
+</code></pre></div></section></main></body></html>

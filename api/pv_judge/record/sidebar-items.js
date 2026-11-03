@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_DETAIL_CHARS"],"enum":["JudgeMode"],"struct":["JudgeInputs","JudgeRecord","OutcomeRecord"]};

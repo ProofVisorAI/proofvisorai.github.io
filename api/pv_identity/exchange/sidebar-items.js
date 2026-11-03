@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["JWT_TOKEN_TYPE","TOKEN_EXCHANGE_GRANT_TYPE"],"enum":["ExchangeError"],"fn":["build_exchanged_claims","build_exchanged_claims_with_actor","check_exchanged_revocation","scope_intersection","verify_exchanged_token"],"struct":["ExchangeActor","ExchangeParams","ExchangedClaims","ExchangedValidation","TokenExchangeRequest","TokenExchangeResponse"]};

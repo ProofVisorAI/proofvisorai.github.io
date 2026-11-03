@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_ENDPOINT"],"fn":["derived_weights_sha256","is_fixed_version"],"struct":["TypeSafeJudge","TypeSafeJudgeConfig"]};

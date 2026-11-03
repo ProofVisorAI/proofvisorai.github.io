@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_MODEL_BYTES","MAX_TOKENIZER_BYTES"],"fn":["softmax"],"struct":["LocalOnnxConfig","LocalOnnxJudge"]};

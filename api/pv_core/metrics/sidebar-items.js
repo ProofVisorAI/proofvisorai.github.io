@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_LATENCY_BOUNDS_US","WIDE_LATENCY_BOUNDS_US"],"struct":["Counter","Gauge","Histogram","Registry"]};
