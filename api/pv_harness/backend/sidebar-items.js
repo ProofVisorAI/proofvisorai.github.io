@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_BACKEND_NAME"],"enum":["BackendAuthMode"],"fn":["is_private_ip"],"struct":["BackendRouter","PrivateOnlyResolver","ResolvedBackend"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_LIST_LIMIT","MAX_LIST_LIMIT"],"fn":["app_js","index","list_sessions","session_detail","stats","style_css"],"struct":["ListQuery"]};

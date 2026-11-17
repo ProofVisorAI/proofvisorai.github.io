@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["StateError","TrySpendOutcome"],"struct":["InMemoryStore","Refund","Spend"],"trait":["StateStore"]};

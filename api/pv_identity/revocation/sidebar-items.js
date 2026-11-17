@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["RevokeOutcome","RevokedBy"],"struct":["InMemoryRevocationStore","RevocationHealth","RevocationIdentity"],"trait":["RevocationStore"]};

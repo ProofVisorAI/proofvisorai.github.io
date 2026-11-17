@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["WriterError"],"fn":["metrics","write_atomic"],"struct":["TrajectoryBuilder"]};

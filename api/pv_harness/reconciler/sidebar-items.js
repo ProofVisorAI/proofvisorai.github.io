@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["JUDGED_PROMOTION_DEADLINE","MAX_JUDGED_PROMOTIONS_PER_TICK"],"enum":["FinalizeError","FinalizeOutcome"],"fn":["prune_sealed_atif_blocking","spawn_reconciler"],"struct":["Finalizer","SessionLifecycleGuard","SessionLockTable"]};

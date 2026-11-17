@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["INTENT_TOKEN_TYP"],"enum":["AuthzDecision"],"struct":["AuthzAction","AuthzEvalRequest","AuthzEvalResponse","AuthzResource","AuthzSubject","CallerFacts","IntentActor","IntentClaims","PolicyDecisionPoint","TokenSigner"]};

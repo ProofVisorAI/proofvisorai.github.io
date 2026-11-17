@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["RECEIPT_DOMAIN_TAG_V2","RECEIPT_VERSION"],"enum":["ReceiptError","ReceiptSubject"],"fn":["new_body","signing_message"],"struct":["CostSummary","Receipt","ReceiptBody","ToolCallSummary"]};

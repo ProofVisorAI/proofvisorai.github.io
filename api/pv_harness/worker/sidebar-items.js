@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SubmitError"],"fn":["spawn_worker","spawn_worker_with_outputs","spawn_worker_with_sink","spawn_worker_with_spool","spawn_worker_with_spool_authenticated"],"struct":["AtifCapture","ResponseAttempt","ResponsePermit","WorkerAndResponsePermit","WorkerHandle","WorkerJob","WorkerPermit"]};

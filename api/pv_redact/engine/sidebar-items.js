@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_PATTERN_BYTES","PATTERN_DFA_SIZE_LIMIT","PATTERN_NEST_LIMIT","PATTERN_SIZE_LIMIT"],"enum":["RedactError"],"fn":["compile_pattern"],"struct":["RedactionConfig","RedactionEngine"]};

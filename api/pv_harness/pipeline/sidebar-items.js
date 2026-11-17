@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HTTP_CONNECT_TIMEOUT","IDLE_CLOSE_TIMEOUTS_HELP","MCP_DRAIN_TIMEOUTS_HELP","SESSION_CLOSE_TIMEOUTS_HELP"],"enum":["PipelineError"],"fn":["describe_upstream_auth","effective_upstream_auth_header"],"mod":["supervision_help"],"struct":["AppState","ForwardedResponse","PreparedRequest"],"type":["ErrorSource"]};

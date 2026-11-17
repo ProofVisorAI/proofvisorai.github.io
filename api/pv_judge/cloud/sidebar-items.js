@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CONTRACT","MAX_RESPONSE_BYTES"],"enum":["RedactionTarget"],"fn":["validate_endpoint"],"struct":["CloudJudge","CloudJudgeConfig"],"type":["Redactor"]};

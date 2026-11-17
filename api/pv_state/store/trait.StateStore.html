@@ -1,0 +1,156 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Atomic counter operations. Every mutation is atomic with respect to concurrent callers; `try_spend` is a single check-and-spend (never a read-then-write)."><title>StateStore in pv_state::store - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="pv_state" data-themes="" data-resource-suffix="" data-rustdoc-version="1.97.1 (8bab26f4f 2026-07-14)" data-channel="1.97.1" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc trait"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">StateStore</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../pv_state/index.html">pv_<wbr>state</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">State<wbr>Store</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#counter-lifetime" title="Counter lifetime">Counter lifetime</a></li></ul><h3><a href="#required-methods">Required Methods</a></h3><ul class="block"><li><a href="#tymethod.add" title="add">add</a></li><li><a href="#tymethod.get" title="get">get</a></li><li><a href="#tymethod.remove" title="remove">remove</a></li><li><a href="#tymethod.try_spend_many" title="try_spend_many">try_spend_many</a></li></ul><h3><a href="#provided-methods">Provided Methods</a></h3><ul class="block"><li><a href="#method.counter_ttl_secs" title="counter_ttl_secs">counter_ttl_secs</a></li><li><a href="#method.fetch_max" title="fetch_max">fetch_max</a></li><li><a href="#method.push_recent" title="push_recent">push_recent</a></li><li><a href="#method.recent" title="recent">recent</a></li><li><a href="#method.refund" title="refund">refund</a></li><li><a href="#method.refund_many" title="refund_many">refund_many</a></li><li><a href="#method.remove_prefix" title="remove_prefix">remove_prefix</a></li><li><a href="#method.shares_recent_lists" title="shares_recent_lists">shares_recent_lists</a></li><li><a href="#method.try_spend" title="try_spend">try_spend</a></li></ul><h3><a href="#implementors">Implementors</a></h3></section><div id="rustdoc-modnav"><h2><a href="index.html">In pv_<wbr>state::<wbr>store</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">pv_state</a>::<wbr><a href="index.html">store</a></div><h1>Trait <span class="trait">State<wbr>Store</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/pv_state/store.rs.html#112-282">Source</a> </span></div><pre class="rust item-decl"><code>pub trait StateStore: <a class="trait" href="https://doc.rust-lang.org/1.97.1/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/1.97.1/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> {
+<details class="toggle type-contents-toggle"><summary class="hideme"><span>Show 13 methods</span></summary>    // Required methods
+    fn <a href="#tymethod.add" class="fn">add</a>(&amp;self, key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>, delta: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.get" class="fn">get</a>(&amp;self, key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.try_spend_many" class="fn">try_spend_many</a>(
+        &amp;self,
+        spends: &amp;[<a class="struct" href="struct.Spend.html" title="struct pv_state::store::Spend">Spend</a>],
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="enum" href="enum.TrySpendOutcome.html" title="enum pv_state::store::TrySpendOutcome">TrySpendOutcome</a>, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.remove" class="fn">remove</a>(&amp;self, key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>);
+
+    // Provided methods
+    fn <a href="#method.fetch_max" class="fn">fetch_max</a>(&amp;self, _key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>, _value: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.counter_ttl_secs" class="fn">counter_ttl_secs</a>(&amp;self) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.try_spend" class="fn">try_spend</a>(
+        &amp;self,
+        key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>,
+        amount: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>,
+        limit: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.bool.html">bool</a>, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.refund" class="fn">refund</a>(&amp;self, key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>, amount: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>) { ... }
+<span class="item-spacer"></span>    fn <a href="#method.refund_many" class="fn">refund_many</a>(&amp;self, refunds: &amp;[<a class="struct" href="struct.Refund.html" title="struct pv_state::store::Refund">Refund</a>]) { ... }
+<span class="item-spacer"></span>    fn <a href="#method.remove_prefix" class="fn">remove_prefix</a>(&amp;self, prefix: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>) { ... }
+<span class="item-spacer"></span>    fn <a href="#method.shares_recent_lists" class="fn">shares_recent_lists</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.bool.html">bool</a> { ... }
+<span class="item-spacer"></span>    fn <a href="#method.push_recent" class="fn">push_recent</a>(
+        &amp;self,
+        key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>,
+        value: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>,
+        keep: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.usize.html">usize</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.unit.html">()</a>, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.recent" class="fn">recent</a>(&amp;self, key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>, max: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.usize.html">usize</a>) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="https://doc.rust-lang.org/1.97.1/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="https://doc.rust-lang.org/1.97.1/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt; { ... }
+</details>}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Atomic counter operations. Every mutation is atomic with respect to
+concurrent callers; <code>try_spend</code> is a single check-and-spend (never a
+read-then-write).</p>
+<h2 id="counter-lifetime"><a class="doc-anchor" href="#counter-lifetime">§</a>Counter lifetime</h2>
+<p>Backends with native expiry apply a TTL to every counter they touch:
+<code>RedisStore</code> refreshes a 24 h TTL (<code>BUDGET_COUNTER_TTL_SECS</code> in
+<code>redis_store.rs</code>) on each spend/add/refund, so a session idle past
+that window has its budget counters silently reset. <code>InMemoryStore</code>
+never expires. Callers must bound session lifetimes to the backend
+TTL (or clean up explicitly via <code>remove</code>/<code>remove_prefix</code>) so the two
+backends stay behaviorally aligned across dev and prod.</p>
+</div></details><h2 id="required-methods" class="section-header">Required Methods<a href="#required-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="tymethod.add" class="method"><a class="src rightside" href="../../src/pv_state/store.rs.html#114">Source</a><h4 class="code-header">fn <a href="#tymethod.add" class="fn">add</a>(&amp;self, key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>, delta: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt;</h4></section></summary><div class="docblock"><p>Add <code>delta</code> to <code>key</code>, returning the new value.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.get" class="method"><a class="src rightside" href="../../src/pv_state/store.rs.html#136">Source</a><h4 class="code-header">fn <a href="#tymethod.get" class="fn">get</a>(&amp;self, key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt;</h4></section></summary><div class="docblock"><p>Read the current value of <code>key</code> (0 if absent).</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.try_spend_many" class="method"><a class="src rightside" href="../../src/pv_state/store.rs.html#176">Source</a><h4 class="code-header">fn <a href="#tymethod.try_spend_many" class="fn">try_spend_many</a>(
+    &amp;self,
+    spends: &amp;[<a class="struct" href="struct.Spend.html" title="struct pv_state::store::Spend">Spend</a>],
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="enum" href="enum.TrySpendOutcome.html" title="enum pv_state::store::TrySpendOutcome">TrySpendOutcome</a>, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt;</h4></section></summary><div class="docblock"><p>Atomically validate and commit every spend, or commit none.</p>
+<p>Every <code>Spend</code> in <code>spends</code> must carry a distinct <code>key</code>; two entries for
+the same key would each observe the pre-commit value in the check
+phase and pass their independent limit checks, then the commit phase
+would sum them and blow through the cap. Duplicate keys return
+<code>StateError::Backend</code> (not <code>Overflow</code>), matching the API-misuse class.</p>
+<p>On success returns <a href="enum.TrySpendOutcome.html#variant.Committed" title="variant pv_state::store::TrySpendOutcome::Committed"><code>TrySpendOutcome::Committed</code></a> carrying the
+post-commit min-headroom across the spent keys — computed
+server-side in the SAME atomic section that committed the
+spend, so it cannot race with a concurrent spend/refund/
+remove_prefix on the same keys. Callers that previously
+followed a successful spend with a <code>get</code>-per-dimension
+<code>remaining_min</code> computation to build
+<code>BudgetDecision::Allowed { remaining }</code> should use the
+returned value directly (R66 F3).</p>
+<p>On refusal returns <a href="enum.TrySpendOutcome.html#variant.Refused" title="variant pv_state::store::TrySpendOutcome::Refused"><code>TrySpendOutcome::Refused</code></a> with the
+index of the offending spend.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.remove" class="method"><a class="src rightside" href="../../src/pv_state/store.rs.html#179">Source</a><h4 class="code-header">fn <a href="#tymethod.remove" class="fn">remove</a>(&amp;self, key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>)</h4></section></summary><div class="docblock"><p>Remove a key (session cleanup).</p>
+</div></details></div><h2 id="provided-methods" class="section-header">Provided Methods<a href="#provided-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="method.fetch_max" class="method"><a class="src rightside" href="../../src/pv_state/store.rs.html#118-122">Source</a><h4 class="code-header">fn <a href="#method.fetch_max" class="fn">fetch_max</a>(&amp;self, _key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>, _value: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt;</h4></section></summary><div class="docblock"><p>Atomically retain the greater of the stored value and <code>value</code>, returning
+the resulting maximum. Used for monotonic revocation cutoffs.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.counter_ttl_secs" class="method"><a class="src rightside" href="../../src/pv_state/store.rs.html#131-133">Source</a><h4 class="code-header">fn <a href="#method.counter_ttl_secs" class="fn">counter_ttl_secs</a>(&amp;self) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>&gt;</h4></section></summary><div class="docblock"><p>Backend counter TTL in seconds, if the backend expires counters
+natively. <code>None</code> means counters live for the process lifetime
+(in-memory). Exposing it makes the prod/dev divergence
+a VALUE callers can inspect (startup logs it; ops docs cite it)
+instead of a doc comment — a session active longer than this
+window has its budget counters silently reset against the
+expiring backend only.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.try_spend" class="method"><a class="src rightside" href="../../src/pv_state/store.rs.html#145-154">Source</a><h4 class="code-header">fn <a href="#method.try_spend" class="fn">try_spend</a>(
+    &amp;self,
+    key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>,
+    amount: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>,
+    limit: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.bool.html">bool</a>, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt;</h4></section></summary><div class="docblock"><p>Atomically spend <code>amount</code> from the remaining budget <code>limit - spent(key)</code>.
+Returns <code>Ok(true)</code> and records the spend if the full <code>amount</code> fits,
+<code>Ok(false)</code> (recording nothing) otherwise.</p>
+<p>Default impl routes through <a href="trait.StateStore.html#tymethod.try_spend_many" title="method pv_state::store::StateStore::try_spend_many"><code>Self::try_spend_many</code></a>; backends
+override only if they can express single-key check-and-spend
+more cheaply than the multi-key path.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.refund" class="method"><a class="src rightside" href="../../src/pv_state/store.rs.html#197-199">Source</a><h4 class="code-header">fn <a href="#method.refund" class="fn">refund</a>(&amp;self, key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>, amount: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.u64.html">u64</a>)</h4></section></summary><div class="docblock"><p>Return a previously-spent <code>amount</code> to a counter. Saturating: if
+the stored value is below <code>amount</code> (e.g. a concurrent
+<code>remove_prefix</code> cleared it first, or another refund already
+covered part of the debt) the counter clamps at 0 rather than
+underflowing into “negative budget”. Backends must never
+propagate a refund error to the caller — the refund is
+best-effort compensation on a lost-race path where the primary
+verdict has already been decided. Default <code>remove_prefix</code>
+semantics apply: backends with native TTL expiry may fold this
+into their own cleanup if they prefer.</p>
+<p>Introduced to close a concurrent-MCP
+budget double-spend. When two identical MCP requests race and
+one loses the atomic <code>execution.claim()</code>, the sandbox-gate
+spend is refunded so the budget counters reflect only the
+admitted work.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.refund_many" class="method"><a class="src rightside" href="../../src/pv_state/store.rs.html#227-231">Source</a><h4 class="code-header">fn <a href="#method.refund_many" class="fn">refund_many</a>(&amp;self, refunds: &amp;[<a class="struct" href="struct.Refund.html" title="struct pv_state::store::Refund">Refund</a>])</h4></section></summary><div class="docblock"><p>Atomic multi-key refund. Twin to <a href="trait.StateStore.html#tymethod.try_spend_many" title="method pv_state::store::StateStore::try_spend_many"><code>Self::try_spend_many</code></a>.</p>
+<p>Best-effort by contract (mirroring <code>refund</code>): backends
+swallow errors internally so a compensation failure never
+turns into a 5xx on the caller path. The atomicity guarantee
+is: every backend implementation MUST either apply every
+listed refund or none of them, so a concurrent
+<code>try_tool_call</code> / <code>try_spend_many</code> cannot observe partially-
+refunded state (fresh <code>total_calls</code> headroom but still-
+charged per-tool, etc.). The trait’s default falls back to
+per-key <code>refund</code> calls — safe for the single-key case and
+for backends that inherit the default, but atomicity of
+downstream callers relies on backends overriding this with a
+single-transaction implementation. <code>InMemoryStore</code> takes
+its <code>transaction_lock</code> once around the whole batch;
+<code>RedisStore</code> sends a single Lua script keyed on every
+counter (all sharing the session’s Redis Cluster hash tag,
+so cross-slot fan-out is impossible).</p>
+<p>Duplicate keys in a single call are applied step-wise per
+entry with the same saturate-at-zero clamp as the single-key
+<code>refund</code>; the two backends match. In practice production
+callers (currently only <code>refund_tool_call</code>) never produce
+duplicate keys, so the step-wise-vs-summed distinction is
+only relevant to a bespoke caller that intentionally batches
+multiple entries against one counter.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.remove_prefix" class="method"><a class="src rightside" href="../../src/pv_state/store.rs.html#253-255">Source</a><h4 class="code-header">fn <a href="#method.remove_prefix" class="fn">remove_prefix</a>(&amp;self, prefix: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>)</h4></section></summary><div class="docblock"><p>Remove every key beginning with <code>prefix</code> (whole-session cleanup at
+finalization). Every backend must implement this: native expiry
+(e.g. Redis TTLs) is NOT a substitute, because a finalized session
+id can be recycled into a fresh session within the TTL window and
+would inherit the prior incarnation’s counters. In-process backends
+additionally need it or session-keyed counters accumulate for the
+process lifetime.</p>
+<p>CLUSTER-MODE HAZARD FOR FUTURE CALLERS.
+The Redis Cluster implementation of <code>remove_prefix</code> routes SCAN
+and DEL to a SINGLE hash slot — the one derived from the prefix.
+This works only when every key under the prefix shares that
+slot, i.e. the prefix contains a Redis Cluster hash tag
+(<code>{...}</code>). Today <code>ActionBudget::session_prefix</code> wraps the digest
+in a <code>{hash-tag}</code> (see <code>budget.rs</code>), so all its keys land in
+the same slot and this is safe. A future caller that does NOT
+hash-tag its prefix would silently leave keys behind in other
+slots. Cross-slot SCAN is not supported by Redis Cluster —
+there is no correct implementation for a non-tagged prefix, so
+this remains a caller-side invariant.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.shares_recent_lists" class="method"><a class="src rightside" href="../../src/pv_state/store.rs.html#259-261">Source</a><h4 class="code-header">fn <a href="#method.shares_recent_lists" class="fn">shares_recent_lists</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.bool.html">bool</a></h4></section></summary><div class="docblock"><p>True when this backend is shared between harness instances and
+supports <a href="trait.StateStore.html#method.push_recent" title="method pv_state::store::StateStore::push_recent"><code>Self::push_recent</code></a> and <a href="trait.StateStore.html#method.recent" title="method pv_state::store::StateStore::recent"><code>Self::recent</code></a>.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.push_recent" class="method"><a class="src rightside" href="../../src/pv_state/store.rs.html#266-271">Source</a><h4 class="code-header">fn <a href="#method.push_recent" class="fn">push_recent</a>(
+    &amp;self,
+    key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>,
+    value: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>,
+    keep: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.usize.html">usize</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.unit.html">()</a>, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt;</h4></section></summary><div class="docblock"><p>Put <code>value</code> at the front of the list at <code>key</code> and keep only its
+newest <code>keep</code> entries, atomically. Backends that share state
+expire the list like their counters.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.recent" class="method"><a class="src rightside" href="../../src/pv_state/store.rs.html#276-281">Source</a><h4 class="code-header">fn <a href="#method.recent" class="fn">recent</a>(&amp;self, key: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.str.html">str</a>, max: <a class="primitive" href="https://doc.rust-lang.org/1.97.1/std/primitive.usize.html">usize</a>) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.97.1/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="https://doc.rust-lang.org/1.97.1/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="https://doc.rust-lang.org/1.97.1/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;, <a class="enum" href="enum.StateError.html" title="enum pv_state::store::StateError">StateError</a>&gt;</h4></section></summary><div class="docblock"><p>The newest <code>max</code> entries of the list at <code>key</code>, newest first
+(empty when absent). Reading a bounded range keeps a list that
+another writer grew from costing every reader.</p>
+</div></details></div><h2 id="implementors" class="section-header">Implementors<a href="#implementors" class="anchor">§</a></h2><div id="implementors-list"><div class="negative-marker"></div><section id="impl-StateStore-for-RedisStore" class="impl"><a class="src rightside" href="../../src/pv_state/redis_store.rs.html#459-821">Source</a><a href="#impl-StateStore-for-RedisStore" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="trait.StateStore.html" title="trait pv_state::store::StateStore">StateStore</a> for <a class="struct" href="../redis_store/struct.RedisStore.html" title="struct pv_state::redis_store::RedisStore">RedisStore</a></h3></section><section id="impl-StateStore-for-InMemoryStore" class="impl"><a class="src rightside" href="../../src/pv_state/store.rs.html#334-506">Source</a><a href="#impl-StateStore-for-InMemoryStore" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="trait.StateStore.html" title="trait pv_state::store::StateStore">StateStore</a> for <a class="struct" href="struct.InMemoryStore.html" title="struct pv_state::store::InMemoryStore">InMemoryStore</a></h3></section></div><script src="../../trait.impl/pv_state/store/trait.StateStore.js" async></script></section></div></main></body></html>

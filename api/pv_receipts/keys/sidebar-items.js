@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["KeyError"],"struct":["Ed25519Signer","Keyring"],"trait":["Signer"]};

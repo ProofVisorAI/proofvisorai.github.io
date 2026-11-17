@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["NoopVectorSink","QdrantVectorSink"],"trait":["VectorSink"],"type":["VectorSearchFuture","VectorSinkFuture"]};

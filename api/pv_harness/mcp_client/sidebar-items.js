@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LATEST_PROTOCOL_VERSION","PROTOCOL_VERSION_HEADER","SESSION_ID_HEADER","SUPPORTED_PROTOCOL_VERSIONS"],"enum":["McpError"],"fn":["is_supported_version"],"struct":["BackendEndpoint","BackendSession","McpBackendClient","SseDecoder"]};

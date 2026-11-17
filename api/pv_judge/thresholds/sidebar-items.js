@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["DecisionCause","JudgeAction"],"fn":["format_ppm"],"struct":["FailurePolicy","JudgeDecision","ThresholdPolicy","ThresholdRule"]};

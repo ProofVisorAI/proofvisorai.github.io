@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["compile","read_bundle","status_path"],"struct":["BundlePolicy","CompiledBundle","PolicyBundle","PolicyPush","PolicyStatus","RateLimits","RateRefusal","RateRule","Unsupported"]};

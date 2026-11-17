@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ENV_PREFIX","LEGACY_ENV_PREFIX"],"fn":["adopt_legacy_env","existing_or_legacy","legacy_env_adoptions"]};

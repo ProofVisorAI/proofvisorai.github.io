@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SUM_TOLERANCE","TOO_LONG_DETAIL"],"enum":["AdapterKind","FailureKind","JudgeError","JudgeOutcome"],"fn":["prob_to_ppm","threshold_to_ppm","validate_scores"],"struct":["JudgeFailure"],"trait":["JudgeAdapter"],"type":["BoxFuture"]};

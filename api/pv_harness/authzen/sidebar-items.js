@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AuthzenDecision"],"fn":["decision_of"],"struct":["AuthzenClient","ResourceMap"]};

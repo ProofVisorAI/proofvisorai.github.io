@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ASSERTION_LIFETIME_S","JWT_BEARER_GRANT_TYPE","MAX_REQUEST_BYTES","TOKEN_FILE_REFRESH"],"enum":["Credential"],"fn":["assertion","certificates","check_listen","error","forwardable","percent_encode","proxy","run","serve"],"struct":["CachedToken","Context","SidecarFile","SidecarOptions"]};

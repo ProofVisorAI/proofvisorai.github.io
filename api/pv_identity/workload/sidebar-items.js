@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["JWT_BEARER_GRANT_TYPE","MAX_ASSERTION_LIFETIME_S"],"enum":["WorkloadError"],"fn":["cf_identity","name_attributes","tlv"],"struct":["CfInstanceIdentity","VerifiedAssertion","WorkloadTrust"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ARG_MATCHES_TASK","CHILD_USES_PARENT_ENTITLEMENT","LOOP_PROGRESS","MAX_LABELS","MEMORY_WRITE_SAFE","OUTPUT_SAFE"],"fn":["validate_predicate_id"],"struct":["PredicateDef","PredicateRegistry"]};

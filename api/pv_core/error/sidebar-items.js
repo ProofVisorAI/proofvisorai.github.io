@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["JCS_SAFE_MAX"],"enum":["CoreError"],"fn":["check_jcs_safe"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["issuer","trust_gateway_tokens"],"struct":["WorkloadIssuer"],"type":["SharedWorkloadIssuer"]};

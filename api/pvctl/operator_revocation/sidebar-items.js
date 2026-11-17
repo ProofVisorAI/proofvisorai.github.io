@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Target","TokenKind"],"fn":["credential","endpoint","read_credential_file","revoke","run","validate_identifier"],"struct":["Acknowledgement","Options"]};

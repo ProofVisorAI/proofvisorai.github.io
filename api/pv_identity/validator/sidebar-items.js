@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_LEEWAY_SECS","MAX_IDENTITY_STRING_CHARS","MAX_SCOPES"],"enum":["IdentityError","KeyMaterial"],"struct":["IdentityValidator","ValidatedIdentity"]};

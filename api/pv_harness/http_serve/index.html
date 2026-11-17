@@ -1,0 +1,44 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Accept loop with client-silence reaping — the slowloris defense `axum::serve` cannot provide."><title>pv_harness::http_serve - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="pv_harness" data-themes="" data-resource-suffix="" data-rustdoc-version="1.97.1 (8bab26f4f 2026-07-14)" data-channel="1.97.1" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module http_serve</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../pv_harness/index.html">pv_<wbr>harness</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module http_<wbr>serve</a></h2><h3><a href="#constants">Module Items</a></h3><ul class="block"><li><a href="#constants" title="Constants">Constants</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate pv_<wbr>harness</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">pv_harness</a></div><h1>Module <span>http_<wbr>serve</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/pv_harness/http_serve.rs.html#1-466">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Accept loop with client-silence reaping — the slowloris defense
+<code>axum::serve</code> cannot provide.</p>
+<p><code>axum::serve</code> (0.8) builds hyper-util’s connection builder with <strong>no
+timer and no <code>header_read_timeout</code></strong> and exposes no way to set one, so
+a client that connects and sends a partial request line — or full
+headers and then dribbles a <code>Content-Length</code> body forever — holds its
+fd and connection task indefinitely (verified empirically: 90 s+ holds
+with zero reaping). On the shipped k8s/systemd exposure that is an
+unauthenticated fd-exhaustion vector on the proxy front door.</p>
+<p>This module owns the accept loop instead, mirroring axum’s semantics
+(<code>Router::call</code> per connection, <code>serve_connection_with_upgrades</code>,
+graceful drain on shutdown) while adding exactly two client-silence
+bounds — deliberately <em>not</em> a whole-request deadline, because a
+legitimate upstream first token can take minutes and SSE responses
+stream far longer than any sane global timeout:</p>
+<ul>
+<li><strong>Header phase</strong>: hyper’s <code>header_read_timeout</code> (30 s), which also
+reaps pre-request idle keep-alive connections (hyper arms it
+between requests on an idle HTTP/1 connection).</li>
+<li><strong>Body phase</strong>: a per-<em>frame</em> gap timeout on the request body
+(30 s between chunks), applied via <code>SilenceBoundedBody</code>. A slow
+uploader making real progress never trips it; a stalled one is
+aborted with a hyper error that resets the stream.</li>
+<li><strong>HTTP/2</strong>: keep-alive pings (20 s interval / 30 s grace) reap
+silent peers; <code>header_read_timeout</code> covers the h1 preface path.</li>
+</ul>
+<p>Shutdown mirrors <code>axum::serve::with_graceful_shutdown</code>: when the
+caller’s shutdown future resolves, the listener is dropped (new
+connects refused), every live connection gets
+<code>graceful_shutdown()</code> via [<code>hyper_util::server::graceful::GracefulShutdown</code>],
+and the returned future resolves once all connections finish — the
+caller keeps its own drain-budget <code>timeout</code> around that future, so
+the drain-timeout accounting in <code>main.rs</code> is unchanged.</p>
+</div></details><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.BODY_FRAME_GAP_TIMEOUT.html" title="constant pv_harness::http_serve::BODY_FRAME_GAP_TIMEOUT">BODY_<wbr>FRAME_<wbr>GAP_<wbr>TIMEOUT</a></dt><dd>Maximum gap between request-body frames from the client.
+Production value; passed by <code>main.rs</code> into the serve loop.</dd><dt><a class="constant" href="constant.HEADER_READ_TIMEOUT.html" title="constant pv_harness::http_serve::HEADER_READ_TIMEOUT">HEADER_<wbr>READ_<wbr>TIMEOUT</a></dt><dd>Maximum client silence while reading request headers (also arms
+between keep-alive requests, reaping pre-request idle connections).
+Production value; passed by <code>main.rs</code> into the serve loop.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.serve_with_client_silence_reaping.html" title="fn pv_harness::http_serve::serve_with_client_silence_reaping">serve_<wbr>with_<wbr>client_<wbr>silence_<wbr>reaping</a></dt><dd>Serve <code>router</code> on <code>listener</code> with client-silence reaping, resolving
+after <code>shutdown</code> fires and every remaining connection drains. The
+caller wraps the post-shutdown tail in its own drain-budget timeout.
+<code>on_accept</code> runs synchronously per accepted socket (socket-option
+tuning — the caller owns its failure/log policy). The two silence
+bounds are parameters so tests can exercise reaping in milliseconds;
+production callers pass <a href="constant.HEADER_READ_TIMEOUT.html" title="constant pv_harness::http_serve::HEADER_READ_TIMEOUT"><code>HEADER_READ_TIMEOUT</code></a> /
+<a href="constant.BODY_FRAME_GAP_TIMEOUT.html" title="constant pv_harness::http_serve::BODY_FRAME_GAP_TIMEOUT"><code>BODY_FRAME_GAP_TIMEOUT</code></a>.</dd></dl></section></div></main></body></html>
